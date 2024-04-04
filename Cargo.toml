@@ -1,0 +1,20 @@
+[workspace]
+
+resolver = "2"
+
+members = [
+  "r4-firmware",
+  "r4-x",
+]
+
+[patch.crates-io]
+embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
+embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
+embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
+embassy-nrf = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
+embassy-usb = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
+nrf-softdevice = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "cdee83c0753a0a3c912a67a5bc2e0b46d50aa5ca" }
+nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "cdee83c0753a0a3c912a67a5bc2e0b46d50aa5ca" }
+
+[profile.release]
+debug = 2
