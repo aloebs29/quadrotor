@@ -16,8 +16,8 @@ use nrf_softdevice::{SocEvent, Softdevice};
 use defmt::{info, unwrap};
 use static_cell::StaticCell;
 
-use r4_firmware::ble_server;
-use r4_firmware::usb_serial;
+use quadrotor_firmware::ble_server;
+use quadrotor_firmware::usb_serial;
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {

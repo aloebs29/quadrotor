@@ -3,8 +3,8 @@
 resolver = "2"
 
 members = [
-  "r4-firmware",
-  "r4-x",
+  "quadrotor-firmware",
+  "quadrotor-x",
 ]
 
 [patch.crates-io]

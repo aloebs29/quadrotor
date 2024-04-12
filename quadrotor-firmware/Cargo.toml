@@ -1,10 +1,10 @@
 [package]
-name = "r4-firmware"
+name = "quadrotor-firmware"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-r4-x = { path = "../r4-x", default-features = false, features = ["defmt"] }
+quadrotor-x = { path = "../quadrotor-x", default-features = false, features = ["defmt"] }
 
 embassy-executor = { version = "0.5.0", features = ["task-arena-size-32768", "arch-cortex-m", "executor-thread", "executor-interrupt", "defmt", "integrated-timers"] }
 embassy-futures = { version = "0.1.0" }
