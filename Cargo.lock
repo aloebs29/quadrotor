@@ -281,7 +281,7 @@ source = "git+https://github.com/embassy-rs/embassy?rev=5e9297313641f1a2b4a868e1
 dependencies = [
  "defmt",
  "embassy-futures",
- "embassy-sync 0.5.0 (git+https://github.com/embassy-rs/embassy?rev=5e9297313641f1a2b4a868e1fe625543da8fc40a)",
+ "embassy-sync",
  "embassy-time",
  "embedded-hal 0.2.7",
  "embedded-hal 1.0.0",
@@ -344,7 +344,7 @@ source = "git+https://github.com/embassy-rs/embassy?rev=5e9297313641f1a2b4a868e1
 dependencies = [
  "embassy-futures",
  "embassy-net-driver",
- "embassy-sync 0.5.0 (git+https://github.com/embassy-rs/embassy?rev=5e9297313641f1a2b4a868e1fe625543da8fc40a)",
+ "embassy-sync",
 ]
 
 [[package]]
@@ -361,7 +361,7 @@ dependencies = [
  "document-features",
  "embassy-embedded-hal",
  "embassy-hal-internal",
- "embassy-sync 0.5.0 (git+https://github.com/embassy-rs/embassy?rev=5e9297313641f1a2b4a868e1fe625543da8fc40a)",
+ "embassy-sync",
  "embassy-time",
  "embassy-time-driver",
  "embassy-usb-driver",
@@ -385,19 +385,6 @@ dependencies = [
  "nrf5340-net-pac",
  "nrf9160-pac",
  "rand_core",
-]
-
-[[package]]
-name = "embassy-sync"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd938f25c0798db4280fcd8026bf4c2f48789aebf8f77b6e5cf8a7693ba114ec"
-dependencies = [
- "cfg-if",
- "critical-section",
- "embedded-io-async",
- "futures-util",
- "heapless",
 ]
 
 [[package]]
@@ -452,7 +439,7 @@ dependencies = [
  "defmt",
  "embassy-futures",
  "embassy-net-driver-channel",
- "embassy-sync 0.5.0 (git+https://github.com/embassy-rs/embassy?rev=5e9297313641f1a2b4a868e1fe625543da8fc40a)",
+ "embassy-sync",
  "embassy-usb-driver",
  "heapless",
  "ssmarshal",
@@ -691,7 +678,7 @@ dependencies = [
  "critical-section",
  "defmt",
  "embassy-futures",
- "embassy-sync 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "embassy-sync",
  "embedded-storage",
  "embedded-storage-async",
  "fixed",
@@ -945,6 +932,7 @@ dependencies = [
  "embassy-executor",
  "embassy-futures",
  "embassy-nrf",
+ "embassy-sync",
  "embassy-time",
  "embassy-usb",
  "heapless",

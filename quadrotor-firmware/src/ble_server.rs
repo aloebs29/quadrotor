@@ -1,5 +1,6 @@
 use core::mem;
 
+use embassy_futures::select::{select, Either};
 use nrf_softdevice::ble::advertisement_builder::{
     Flag, LegacyAdvertisementBuilder, LegacyAdvertisementPayload, ServiceList, ServiceUuid16,
 };
@@ -7,7 +8,10 @@ use nrf_softdevice::{ble, raw, Softdevice};
 
 use defmt::*;
 
-const BT_DEVICE_NAME: &str = "R4 Quadcopter";
+use crate::datatypes::InputStateSignal;
+use quadrotor_x::utils::lipo_1s_charge_percent_from_voltage;
+
+const BT_DEVICE_NAME: &str = "Quadcopter";
 static mut BT_ADDRESS: Option<ble::Address> = None;
 
 #[nrf_softdevice::gatt_service(uuid = "180f")]
@@ -21,20 +25,34 @@ struct ServerInternal {
     battery_service: BatteryService,
 }
 
-// NOTE: This is basically a structure to avoid mismatched privacy rules that would result from making the derived gatt
-//       server public.
-pub struct Server {
+pub struct Server<'a> {
     internal: ServerInternal,
+    input_state_signal: &'a InputStateSignal,
 }
 
-impl Server {
-    pub fn new(
+impl Server<'_> {
+    pub fn new<'a>(
         sd: &mut Softdevice,
+        input_state_signal: &'static InputStateSignal,
     ) -> Result<Self, nrf_softdevice::ble::gatt_server::RegisterError> {
         let internal = ServerInternal::new(sd)?;
-        let _ = internal.battery_service.battery_level_set(&77u8);
 
-        Ok(Self { internal })
+        Ok(Self {
+            internal,
+            input_state_signal,
+        })
+    }
+
+    async fn update_input_values<'a>(&self) {
+        loop {
+            let input_state = self.input_state_signal.wait().await;
+            let battery_percent =
+                lipo_1s_charge_percent_from_voltage(input_state.battery_voltage) as u8;
+            let _ = self
+                .internal
+                .battery_service
+                .battery_level_set(&battery_percent);
+        }
     }
 }
 
@@ -77,7 +95,7 @@ pub fn get_softdevice_config() -> nrf_softdevice::Config {
 }
 
 #[embassy_executor::task]
-pub async fn ble_task(sd: &'static Softdevice, server: Server) -> ! {
+pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
     unsafe {
         BT_ADDRESS = Some(ble::get_address(sd));
     }
@@ -106,17 +124,21 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server) -> ! {
 
         info!("Connected to BLE client");
 
-        // Run the GATT server on the connection. This returns when the connection gets disconnected.
-        let e = ble::gatt_server::run(&conn, &server.internal, |e| match e {
+        let update_fut = server.update_input_values();
+        let gatt_fut = ble::gatt_server::run(&conn, &server.internal, |e| match e {
             ServerInternalEvent::BatteryService(e) => match e {
                 BatteryServiceEvent::BatteryLevelCccdWrite { notifications } => {
                     debug!("battery notifications: {}", notifications)
                 }
             },
-        })
-        .await;
+        });
 
-        info!("Disconnected from BLE connection (with {:?})", e);
+        match select(update_fut, gatt_fut).await {
+            Either::First(_) => (),
+            Either::Second(e) => {
+                info!("Disconnected from BLE connection (with {:?})", e)
+            }
+        };
     }
 }
 

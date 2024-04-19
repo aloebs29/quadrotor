@@ -4,12 +4,13 @@
 use core::mem;
 
 use embassy_executor::Spawner;
-use embassy_time::Timer;
+use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
-use embassy_nrf::interrupt;
 use embassy_nrf::pac;
+use embassy_nrf::saadc;
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
+use embassy_nrf::{bind_interrupts, interrupt};
 
 use nrf_softdevice::{SocEvent, Softdevice};
 
@@ -17,11 +18,19 @@ use defmt::{info, unwrap};
 use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
+use quadrotor_firmware::datatypes::{InputState, InputStateSignal};
 use quadrotor_firmware::usb_serial;
+
+const MAIN_LOOP_INTERVAL_MS: u64 = 10;
+const VBAT_DIVIDER: f32 = 568.75;
+
+bind_interrupts!(struct SaadcIrqs {
+    SAADC => saadc::InterruptHandler;
+});
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("R4 Quadcopter flight controller");
+    info!("Quadcopter flight controller");
 
     // Interrupt priority levels 0, 1, and 4 are reserved for the SoftDevice. Make sure to not use them.
     let mut config = embassy_nrf::config::Config::default();
@@ -43,10 +52,19 @@ async fn main(spawner: Spawner) {
     // Initialize soft device with settings from BLE module
     let sd = Softdevice::enable(&ble_server::get_softdevice_config());
 
+    // Setup shared data between tasks
+    static INPUT_STATE_SIGNAL: StaticCell<InputStateSignal> = StaticCell::new();
+    let input_state_signal = INPUT_STATE_SIGNAL.init(InputStateSignal::new());
+
     // Initialize USB
     let (usb_driver, cdc_class) = usb_serial::init(p.USBD, vbus_detect);
     // Initialize BLE peripheral server
-    let server = unwrap!(ble_server::Server::new(sd));
+    let server = unwrap!(ble_server::Server::new(sd, input_state_signal));
+
+    // Initialize ADC
+    let adc_config = saadc::Config::default();
+    let adc_channel_config = saadc::ChannelConfig::single_ended(p.P0_29);
+    let mut adc = saadc::Saadc::new(p.SAADC, SaadcIrqs, adc_config, [adc_channel_config]);
 
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
@@ -54,13 +72,29 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(usb_serial::serial_task(cdc_class)));
     unwrap!(spawner.spawn(ble_server::ble_task(sd, server)));
 
+    // Set up main control loop
     let mut led = Output::new(p.P1_10, Level::Low, OutputDrive::Standard);
 
+    let mut input_state = InputState::default();
+    let mut next_iter_start = Instant::now();
+    let mut adc_msmt_buf = [0i16; 1];
+
     loop {
+        next_iter_start += Duration::from_millis(MAIN_LOOP_INTERVAL_MS);
+        Timer::at(next_iter_start).await;
+
+        // ==============
+        // Perform measurements
         led.set_high();
-        Timer::after_millis(100).await;
+
+        adc.sample(&mut adc_msmt_buf).await;
+        input_state.battery_voltage = adc_msmt_buf[0] as f32 / VBAT_DIVIDER;
+
+        input_state.timestamp = embassy_time::Instant::now().as_ticks();
+
+        input_state_signal.signal(input_state.clone());
         led.set_low();
-        Timer::after_millis(900).await;
+        // ==============
     }
 }
 
