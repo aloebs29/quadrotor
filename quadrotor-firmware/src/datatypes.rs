@@ -26,12 +26,17 @@ impl From<F32x3> for FlatVec3F32 {
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct Telemetry {
+    // Metadata
     pub timestamp: u64,
     pub error_count: u32,
+
+    // Sensor readings
     pub battery_voltage: f32,
     pub accel: FlatVec3F32,
     pub gyro: FlatVec3F32,
     pub mag: FlatVec3F32,
+    pub pressure: f32,
+    // TODO: Orientation/position
 }
 
 pub type TelemetrySignal = Signal<NoopRawMutex, Telemetry>;

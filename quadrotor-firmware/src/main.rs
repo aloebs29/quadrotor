@@ -22,10 +22,12 @@ use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
 use quadrotor_firmware::datatypes::{Telemetry, TelemetrySignal};
+use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::usb_serial;
 
+const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
 const VBAT_DIVIDER: f32 = 568.75;
 
@@ -85,6 +87,8 @@ async fn main(spawner: Spawner) {
     unwrap!(accel_and_mag_sensor.configure(&mut twim).await);
     let mut gyro_sensor = unsafe { fxas21002::FXAS21002_HANDLE.take() };
     unwrap!(gyro_sensor.configure(&mut twim).await);
+    let mut pressure_sensor = unsafe { dps310::DPS310_HANDLE.take() };
+    unwrap!(pressure_sensor.configure(&mut twim).await);
 
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
@@ -102,6 +106,19 @@ async fn main(spawner: Spawner) {
     let mut mag_msmt = F32x3::default();
     let mut gyro_msmt = F32x3::default();
     let mut adc_msmt_buf = [0i16; 1];
+
+    // NOTE: We don't want to start running the control loop with some default pressure measurement, because then our
+    // intial altitude will be way off. Wait until the pressure sensor returns a valid reading.
+    let initial_pressure_timeout =
+        Instant::now() + Duration::from_millis(INITIAL_PRESSURE_TIMEOUT_MS);
+    let mut pressure_msmt = loop {
+        if let Ok(Some(p)) = pressure_sensor.read(&mut twim).await {
+            break p;
+        }
+        if Instant::now() > initial_pressure_timeout {
+            panic!("Timed out while waiting for initial pressure sensor reading.");
+        }
+    };
 
     loop {
         next_iter_start += Duration::from_millis(MAIN_LOOP_INTERVAL_MS);
@@ -128,6 +145,12 @@ async fn main(spawner: Spawner) {
             error_count += 1;
         };
 
+        match pressure_sensor.read(&mut twim).await {
+            Ok(Some(p)) => pressure_msmt = p,
+            Ok(None) => (), // new measurement wasn't ready
+            Err(_) => error_count += 1,
+        }
+
         telemetry_signal.signal(Telemetry {
             timestamp,
             error_count,
@@ -135,6 +158,7 @@ async fn main(spawner: Spawner) {
             accel: accel_msmt.into(),
             gyro: gyro_msmt.into(),
             mag: mag_msmt.into(),
+            pressure: pressure_msmt.into(),
         });
         led.set_low();
         // ==============

@@ -21,13 +21,14 @@ class Vec3:
 
 class Telemetry:
     def __init__(self, packed_bytes):
-        t = struct.unpack("<QIffffffffff", packed_bytes)
+        t = struct.unpack("<QIfffffffffff", packed_bytes)
         self.timestamp = t[0] # millis
         self.error_count = t[1]
         self.battery_voltage = t[2] # V
         self.accel = Vec3(t[3], t[4], t[5]) # mg
         self.gyro  = Vec3(t[6], t[7], t[8]) # dps
         self.mag   = Vec3(t[9], t[10], t[11]) # uT
+        self.pressure = t[12] # Pa
 
 
 @pytest.mark.asyncio
@@ -66,6 +67,7 @@ async def test_ble_telemetry_service(ble_client):
         assert accel_magnitude > 800 and accel_magnitude < 1200
         assert mag_magnitude > 25 and mag_magnitude < 65
         assert gyro_magnitude > -10 and gyro_magnitude < 10
+        assert t.pressure > 70000 and t.pressure < 105000
 
         # Make sure entries are sequential
         if i > 0:
