@@ -8,9 +8,9 @@ use micromath::vector::F32x3;
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct FlatVec3F32 {
-    x: f32,
-    y: f32,
-    z: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
 }
 
 impl From<F32x3> for FlatVec3F32 {
@@ -26,11 +26,12 @@ impl From<F32x3> for FlatVec3F32 {
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct Telemetry {
+    pub timestamp: u64,
+    pub error_count: u32,
     pub battery_voltage: f32,
     pub accel: FlatVec3F32,
     pub gyro: FlatVec3F32,
     pub mag: FlatVec3F32,
-    pub timestamp: u64,
 }
 
 pub type TelemetrySignal = Signal<NoopRawMutex, Telemetry>;

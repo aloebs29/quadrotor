@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+import math
 import struct
 
 import bleak
@@ -14,15 +15,19 @@ class Vec3:
     y: float
     z: float
 
+    def magnitude(self):
+        return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+
 
 class Telemetry:
     def __init__(self, packed_bytes):
-        t = struct.unpack("<ffffffffffQ", packed_bytes)
-        self.battery_voltage = t[0]
-        self.accel = Vec3(t[1], t[2], t[3])
-        self.gyro  = Vec3(t[4], t[5], t[6])
-        self.mag   = Vec3(t[7], t[8], t[9])
-        self.timestamp = t[10] / 1000 # millis -> seconds
+        t = struct.unpack("<QIffffffffff", packed_bytes)
+        self.timestamp = t[0] # millis
+        self.error_count = t[1]
+        self.battery_voltage = t[2] # V
+        self.accel = Vec3(t[3], t[4], t[5]) # mg
+        self.gyro  = Vec3(t[6], t[7], t[8]) # dps
+        self.mag   = Vec3(t[9], t[10], t[11]) # uT
 
 
 @pytest.mark.asyncio
@@ -48,8 +53,19 @@ async def test_ble_telemetry_service(ble_client):
     assert len(telemetry_entries) > 80
     for i in range(len(telemetry_entries)):
         t = telemetry_entries[i]
-        assert t.battery_voltage > 3.0 and t.battery_voltage < 4.5
 
+        accel_magnitude = t.accel.magnitude()
+        mag_magnitude = t.mag.magnitude()
+
+        # Make sure values are in sensible range
+        # NOTE: This assumes the device is at rest with a reasonably small amount of magnetic field interference. The
+        #       magnetometer test may need to be commented out when the device has not had a chance to auto-calibrate
+        #       (via being rotated in a figure-8 pattern).
+        assert t.battery_voltage > 3.0 and t.battery_voltage < 4.5
+        assert accel_magnitude > 800 and accel_magnitude < 1200
+        assert mag_magnitude > 25 and mag_magnitude < 65
+
+        # Make sure entries are sequential
         if i > 0:
             tlast = telemetry_entries[i - 1]
             assert t.timestamp > tlast.timestamp

@@ -5,4 +5,6 @@ use {defmt_rtt as _, panic_probe as _};
 
 pub mod ble_server;
 pub mod datatypes;
+pub mod fxos8700;
 pub mod usb_serial;
+pub mod xerror;

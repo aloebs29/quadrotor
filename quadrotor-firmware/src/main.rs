@@ -4,25 +4,33 @@
 use core::mem;
 
 use embassy_executor::Spawner;
+use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
 use embassy_nrf::pac;
 use embassy_nrf::saadc;
+use embassy_nrf::twim::{self, Twim};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
-use embassy_nrf::{bind_interrupts, interrupt};
+use embassy_nrf::{bind_interrupts, interrupt, peripherals};
 
 use nrf_softdevice::{SocEvent, Softdevice};
 
 use defmt::{info, unwrap};
+use micromath::vector::F32x3;
 use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
 use quadrotor_firmware::datatypes::{Telemetry, TelemetrySignal};
+use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::usb_serial;
 
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
 const VBAT_DIVIDER: f32 = 568.75;
+
+bind_interrupts!(struct I2cIrqs {
+    SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0 => twim::InterruptHandler<peripherals::TWISPI0>;
+});
 
 bind_interrupts!(struct SaadcIrqs {
     SAADC => saadc::InterruptHandler;
@@ -66,6 +74,15 @@ async fn main(spawner: Spawner) {
     let adc_channel_config = saadc::ChannelConfig::single_ended(p.P0_29);
     let mut adc = saadc::Saadc::new(p.SAADC, SaadcIrqs, adc_config, [adc_channel_config]);
 
+    // Initialize I2C
+    let mut i2c_config = twim::Config::default();
+    i2c_config.frequency = twim::Frequency::K400;
+    let mut twim = Twim::new(p.TWISPI0, I2cIrqs, p.P0_12, p.P0_11, i2c_config);
+
+    // Initialize sensors
+    let mut accel_and_mag_sensor = unsafe { fxos8700::FXOS8700_HANDLE.take() };
+    unwrap!(accel_and_mag_sensor.configure(&mut twim).await);
+
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
     unwrap!(spawner.spawn(usb_serial::usb_task(usb_driver)));
@@ -75,8 +92,11 @@ async fn main(spawner: Spawner) {
     // Set up main control loop
     let mut led = Output::new(p.P1_10, Level::Low, OutputDrive::Standard);
 
-    let mut telemetry = Telemetry::default();
     let mut next_iter_start = Instant::now();
+    let mut error_count = 0u32;
+
+    let mut accel_msmt = F32x3::default();
+    let mut mag_msmt = F32x3::default();
     let mut adc_msmt_buf = [0i16; 1];
 
     loop {
@@ -87,12 +107,27 @@ async fn main(spawner: Spawner) {
         // Perform measurements
         led.set_high();
 
-        adc.sample(&mut adc_msmt_buf).await;
-        telemetry.battery_voltage = adc_msmt_buf[0] as f32 / VBAT_DIVIDER;
+        let timestamp = embassy_time::Instant::now().as_millis();
 
-        telemetry.timestamp = embassy_time::Instant::now().as_millis();
+        // NOTE: I2C transactions need to happen in a serial fashion, since they all use the same I2C bus. However, the
+        //       ADC read can happen in parallel with one of those I2C transactions.
+        let adc_fut = adc.sample(&mut adc_msmt_buf);
+        let accel_and_mag_fut =
+            accel_and_mag_sensor.read(&mut twim, &mut accel_msmt, &mut mag_msmt);
+        let (_, accel_and_mag_result) = join(adc_fut, accel_and_mag_fut).await;
+        if let Err(_) = accel_and_mag_result {
+            error_count += 1;
+        }
+        let battery_voltage = adc_msmt_buf[0] as f32 / VBAT_DIVIDER;
 
-        telemetry_signal.signal(telemetry.clone());
+        telemetry_signal.signal(Telemetry {
+            timestamp,
+            error_count,
+            battery_voltage,
+            accel: accel_msmt.into(),
+            gyro: F32x3::default().into(),
+            mag: mag_msmt.into(),
+        });
         led.set_low();
         // ==============
     }
