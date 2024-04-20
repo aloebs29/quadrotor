@@ -13,6 +13,13 @@ cwd = "./quadrotor-firmware"
 command = "cargo"
 args = ["build"]
 
+[tasks.run]
+description = "Run flight controller firmware using probe-rs."
+workspace = false
+cwd = "./quadrotor-firmware"
+command = "cargo"
+args = ["run"]
+
 [tasks.unit-test]
 description = "Unit test platform-independent code on the host system."
 workspace = false

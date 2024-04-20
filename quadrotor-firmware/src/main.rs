@@ -18,7 +18,7 @@ use defmt::{info, unwrap};
 use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
-use quadrotor_firmware::datatypes::{InputState, InputStateSignal};
+use quadrotor_firmware::datatypes::{Telemetry, TelemetrySignal};
 use quadrotor_firmware::usb_serial;
 
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
@@ -53,13 +53,13 @@ async fn main(spawner: Spawner) {
     let sd = Softdevice::enable(&ble_server::get_softdevice_config());
 
     // Setup shared data between tasks
-    static INPUT_STATE_SIGNAL: StaticCell<InputStateSignal> = StaticCell::new();
-    let input_state_signal = INPUT_STATE_SIGNAL.init(InputStateSignal::new());
+    static TELEMETRY_SIGNAL: StaticCell<TelemetrySignal> = StaticCell::new();
+    let telemetry_signal = TELEMETRY_SIGNAL.init(TelemetrySignal::new());
 
     // Initialize USB
     let (usb_driver, cdc_class) = usb_serial::init(p.USBD, vbus_detect);
     // Initialize BLE peripheral server
-    let server = unwrap!(ble_server::Server::new(sd, input_state_signal));
+    let server = unwrap!(ble_server::Server::new(sd, telemetry_signal));
 
     // Initialize ADC
     let adc_config = saadc::Config::default();
@@ -75,7 +75,7 @@ async fn main(spawner: Spawner) {
     // Set up main control loop
     let mut led = Output::new(p.P1_10, Level::Low, OutputDrive::Standard);
 
-    let mut input_state = InputState::default();
+    let mut telemetry = Telemetry::default();
     let mut next_iter_start = Instant::now();
     let mut adc_msmt_buf = [0i16; 1];
 
@@ -88,11 +88,11 @@ async fn main(spawner: Spawner) {
         led.set_high();
 
         adc.sample(&mut adc_msmt_buf).await;
-        input_state.battery_voltage = adc_msmt_buf[0] as f32 / VBAT_DIVIDER;
+        telemetry.battery_voltage = adc_msmt_buf[0] as f32 / VBAT_DIVIDER;
 
-        input_state.timestamp = embassy_time::Instant::now().as_ticks();
+        telemetry.timestamp = embassy_time::Instant::now().as_millis();
 
-        input_state_signal.signal(input_state.clone());
+        telemetry_signal.signal(telemetry.clone());
         led.set_low();
         // ==============
     }

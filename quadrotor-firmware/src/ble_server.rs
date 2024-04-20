@@ -8,7 +8,7 @@ use nrf_softdevice::{ble, raw, Softdevice};
 
 use defmt::*;
 
-use crate::datatypes::InputStateSignal;
+use crate::datatypes::{Telemetry, TelemetrySignal};
 use quadrotor_x::utils::lipo_1s_charge_percent_from_voltage;
 
 const BT_DEVICE_NAME: &str = "Quadcopter";
@@ -20,38 +20,65 @@ struct BatteryService {
     battery_level: u8,
 }
 
+#[nrf_softdevice::gatt_service(uuid = "6dff68a3-f84a-4f54-a244-cc0b528425ea")]
+struct TelemetryService {
+    #[characteristic(uuid = "6dff68a3-f84a-4f54-a244-cc0b528425ea", read, notify)]
+    telemetry: [u8; mem::size_of::<Telemetry>()],
+}
+
 #[nrf_softdevice::gatt_server]
 struct ServerInternal {
     battery_service: BatteryService,
+    telemetry_service: TelemetryService,
 }
 
 pub struct Server<'a> {
     internal: ServerInternal,
-    input_state_signal: &'a InputStateSignal,
+    telemetry_signal: &'a TelemetrySignal,
 }
 
 impl Server<'_> {
     pub fn new<'a>(
         sd: &mut Softdevice,
-        input_state_signal: &'static InputStateSignal,
+        telemetry_signal: &'static TelemetrySignal,
     ) -> Result<Self, nrf_softdevice::ble::gatt_server::RegisterError> {
         let internal = ServerInternal::new(sd)?;
 
         Ok(Self {
             internal,
-            input_state_signal,
+            telemetry_signal,
         })
     }
 
-    async fn update_input_values<'a>(&self) {
+    async fn update_input_values<'a>(&self, connection: &'a ble::Connection) {
         loop {
-            let input_state = self.input_state_signal.wait().await;
+            let telemetry = self.telemetry_signal.wait().await;
+
+            // Update battery service
             let battery_percent =
-                lipo_1s_charge_percent_from_voltage(input_state.battery_voltage) as u8;
+                lipo_1s_charge_percent_from_voltage(telemetry.battery_voltage) as u8;
             let _ = self
                 .internal
                 .battery_service
                 .battery_level_set(&battery_percent);
+
+            // Notify telemetry service
+            // NOTE: Unwrap here as any runtime error just represents a programming error.
+            let telemetry_byte_array: &[u8; mem::size_of::<Telemetry>()] =
+                unwrap!(bytemuck::bytes_of(&telemetry).try_into());
+            match self
+                .internal
+                .telemetry_service
+                .telemetry_notify(connection, telemetry_byte_array)
+            {
+                Ok(_) => (),
+                Err(_) => {
+                    let _ = self
+                        .internal
+                        .telemetry_service
+                        .telemetry_set(telemetry_byte_array);
+                }
+            };
         }
     }
 }
@@ -103,7 +130,10 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
     static ADV_DATA: LegacyAdvertisementPayload = LegacyAdvertisementBuilder::new()
         .flags(&[Flag::GeneralDiscovery, Flag::LE_Only])
         .services_16(ServiceList::Complete, &[ServiceUuid16::BATTERY])
-        .full_name(BT_DEVICE_NAME)
+        .services_128(
+            ServiceList::Complete,
+            &[0x6dff68a3_f84a_4f54_a244_cc0b528425ea_u128.to_le_bytes()],
+        )
         .build();
 
     static SCAN_DATA: LegacyAdvertisementPayload = LegacyAdvertisementBuilder::new().build();
@@ -124,11 +154,16 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
 
         info!("Connected to BLE client");
 
-        let update_fut = server.update_input_values();
+        let update_fut = server.update_input_values(&conn);
         let gatt_fut = ble::gatt_server::run(&conn, &server.internal, |e| match e {
             ServerInternalEvent::BatteryService(e) => match e {
                 BatteryServiceEvent::BatteryLevelCccdWrite { notifications } => {
                     debug!("battery notifications: {}", notifications)
+                }
+            },
+            ServerInternalEvent::TelemetryService(e) => match e {
+                TelemetryServiceEvent::TelemetryCccdWrite { notifications } => {
+                    debug!("telemetry notifications: {}", notifications)
                 }
             },
         });
