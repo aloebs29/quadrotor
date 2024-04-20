@@ -22,6 +22,7 @@ use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
 use quadrotor_firmware::datatypes::{Telemetry, TelemetrySignal};
+use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::usb_serial;
 
@@ -82,6 +83,8 @@ async fn main(spawner: Spawner) {
     // Initialize sensors
     let mut accel_and_mag_sensor = unsafe { fxos8700::FXOS8700_HANDLE.take() };
     unwrap!(accel_and_mag_sensor.configure(&mut twim).await);
+    let mut gyro_sensor = unsafe { fxas21002::FXAS21002_HANDLE.take() };
+    unwrap!(gyro_sensor.configure(&mut twim).await);
 
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
@@ -97,6 +100,7 @@ async fn main(spawner: Spawner) {
 
     let mut accel_msmt = F32x3::default();
     let mut mag_msmt = F32x3::default();
+    let mut gyro_msmt = F32x3::default();
     let mut adc_msmt_buf = [0i16; 1];
 
     loop {
@@ -120,12 +124,16 @@ async fn main(spawner: Spawner) {
         }
         let battery_voltage = adc_msmt_buf[0] as f32 / VBAT_DIVIDER;
 
+        if let Err(_) = gyro_sensor.read(&mut twim, &mut gyro_msmt).await {
+            error_count += 1;
+        };
+
         telemetry_signal.signal(Telemetry {
             timestamp,
             error_count,
             battery_voltage,
             accel: accel_msmt.into(),
-            gyro: F32x3::default().into(),
+            gyro: gyro_msmt.into(),
             mag: mag_msmt.into(),
         });
         led.set_low();

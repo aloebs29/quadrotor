@@ -56,6 +56,7 @@ async def test_ble_telemetry_service(ble_client):
 
         accel_magnitude = t.accel.magnitude()
         mag_magnitude = t.mag.magnitude()
+        gyro_magnitude = t.gyro.magnitude()
 
         # Make sure values are in sensible range
         # NOTE: This assumes the device is at rest with a reasonably small amount of magnetic field interference. The
@@ -64,6 +65,7 @@ async def test_ble_telemetry_service(ble_client):
         assert t.battery_voltage > 3.0 and t.battery_voltage < 4.5
         assert accel_magnitude > 800 and accel_magnitude < 1200
         assert mag_magnitude > 25 and mag_magnitude < 65
+        assert gyro_magnitude > -10 and gyro_magnitude < 10
 
         # Make sure entries are sequential
         if i > 0:
