@@ -14,6 +14,11 @@ FLASH_TIMEOUT = 20.0
 RESET_TIME = 2.0
 SERIAL_TIMEOUT = 2.0
 
+
+def pytest_addoption(parser):
+    parser.addoption("--skip_flash", action="store_true", help="do not flash and reset the device under test")
+
+
 class _ProbeRsThread(threading.Thread):
     def __init__(self, command_str: list, stop_event: threading.Event, flash_done_event: threading.Event, exc_queue: queue.Queue, *args, **kwargs):
         super(_ProbeRsThread, self).__init__(*args, **kwargs)
@@ -39,7 +44,8 @@ class _ProbeRsThread(threading.Thread):
                 line = line.decode()
                 if line.find("Finished in") != -1 and not self.flash_done_event.is_set():
                     self.flash_done_event.set()
-                print(line.rstrip())
+                elif self.flash_done_event.is_set():
+                    print(line.rstrip())
         
         proc.terminate()
         # NOTE: The asyncio.subprocess docs say not to use wait() if you're piping stdout/stderr, and to use
@@ -54,46 +60,49 @@ class _ProbeRsThread(threading.Thread):
             self.exc_queue.put(e)
 
 
-# NOTE: Enable autouse here to rebuild/flash/run on every test invocation. This should really be a dependency of all
-#       other fixtures, but its convenient to leave the device running (without reflash/reset) while developing tests,
-#       and autouse makes this a lot easier to toggle. Pytest seems to run this fixture first when `autouse=True`.
-@pytest.fixture(autouse=False, scope="session")
-def probe_rs_run():
+@pytest.fixture(autouse=True, scope="session")
+def probe_rs_run(pytestconfig):
     command_str = "cargo make run"
     stop_event = threading.Event()
     flash_done_event = threading.Event()
     exc_queue = queue.Queue()
 
     probe_rs_thread = _ProbeRsThread(command_str, stop_event, flash_done_event, exc_queue)
-    probe_rs_thread.start()
 
     def stop_thread():
         stop_event.set()
         probe_rs_thread.join()
-
-    # Wait for flashing to complete
-    start = time.perf_counter()
-    while not flash_done_event.is_set():
-        try:
-            # Check for timeout
-            if time.perf_counter() - start > FLASH_TIMEOUT:
-                raise TimeoutError
             
-            # Check for exception raised by child thread
-            try:
-                exc = exc_queue.get_nowait()
-            except queue.Empty:
-                pass
-            else:
-                raise exc
-    
-        except BaseException as exc:
-            stop_thread()
-            raise exc
+    # If the user requested that the DUT not be flashed/reset (i.e. it is already running), skip this.
+    if not pytestconfig.getoption("skip_flash"):
+        probe_rs_thread.start()
 
-    time.sleep(RESET_TIME)
+        # Wait for flashing to complete
+        start = time.perf_counter()
+        while not flash_done_event.is_set():
+            try:
+                # Check for timeout
+                if time.perf_counter() - start > FLASH_TIMEOUT:
+                    raise TimeoutError
+                
+                # Check for exception raised by child thread
+                try:
+                    exc = exc_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                else:
+                    raise exc
+        
+            except BaseException as exc:
+                stop_thread()
+                raise exc
+
+        time.sleep(RESET_TIME)
+        
     yield
-    stop_thread()
+    
+    if not pytestconfig.getoption("skip_flash"):
+        stop_thread()
 
 
 @pytest.fixture(scope="session")
