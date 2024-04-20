@@ -27,6 +27,12 @@ pub type UsbDriver = Driver<'static, peripherals::USBD, &'static SoftwareVbusDet
 
 type UsbResult<T> = Result<T, EndpointError>;
 
+struct SerialContext {
+    class: CdcAcmClass<'static, UsbDriver>,
+    read_buffer: Vec<u8, MAX_COMMAND_LEN>,
+    write_buffer: String<MAX_RESPONSE_LEN>,
+}
+
 async fn write_line_to_usb(
     class: &mut CdcAcmClass<'static, UsbDriver>,
     data: &[u8],
@@ -38,44 +44,40 @@ async fn write_line_to_usb(
     Ok(())
 }
 
-async fn command_handler(
-    class: &mut CdcAcmClass<'static, UsbDriver>,
-    read_buffer: &[u8],
-) -> UsbResult<()> {
-    static WRITE_BUFFER_CELL: StaticCell<String<MAX_RESPONSE_LEN>> = StaticCell::new();
-    let write_buffer = WRITE_BUFFER_CELL.init_with(|| String::new());
-
-    if read_buffer == b"mac_address" {
+async fn command_handler(context: &mut SerialContext) -> UsbResult<()> {
+    if context.read_buffer.as_slice() == b"mac_address" {
         if let Some(address) = ble_server::get_address() {
             let address = address.bytes();
             write!(
-                write_buffer,
+                context.write_buffer,
                 "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
                 address[5], address[4], address[3], address[2], address[1], address[0]
             )
             .unwrap();
-            write_line_to_usb(class, write_buffer.as_bytes()).await?;
+            let result =
+                write_line_to_usb(&mut context.class, context.write_buffer.as_bytes()).await;
+            context.write_buffer.clear();
+            if result.is_err() {
+                return result;
+            }
         } else {
-            write_line_to_usb(class, b"Unknown").await?;
+            write_line_to_usb(&mut context.class, b"Unknown").await?;
         }
     }
     Ok(())
 }
 
-async fn serial_parser(class: &mut CdcAcmClass<'static, UsbDriver>) -> UsbResult<()> {
-    static READ_BUFFER_CELL: StaticCell<Vec<u8, MAX_COMMAND_LEN>> = StaticCell::new();
-    let read_buffer = READ_BUFFER_CELL.init_with(|| Vec::new());
-
+async fn serial_parser(context: &mut SerialContext) -> UsbResult<()> {
     let mut read_chunk = [0; USB_MAX_PACKET_SIZE as usize];
     loop {
-        let n = class.read_packet(&mut read_chunk).await?;
+        let n = context.class.read_packet(&mut read_chunk).await?;
         for &byte in &read_chunk[..n] {
             // If newline was received, process the command
             if byte == b'\r' || byte == b'\n' {
-                command_handler(class, read_buffer.as_slice()).await?;
-                read_buffer.clear();
+                command_handler(context).await?;
+                context.read_buffer.clear();
             } else {
-                let _ = read_buffer.push(byte);
+                let _ = context.read_buffer.push(byte);
             }
         }
     }
@@ -140,11 +142,18 @@ pub async fn usb_task(mut device: UsbDevice<'static, UsbDriver>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn serial_task(mut class: CdcAcmClass<'static, UsbDriver>) -> ! {
+pub async fn serial_task(class: CdcAcmClass<'static, UsbDriver>) -> ! {
+    static CONTEXT_CELL: StaticCell<SerialContext> = StaticCell::new();
+    let context = CONTEXT_CELL.init_with(|| SerialContext {
+        class,
+        write_buffer: String::new(),
+        read_buffer: Vec::new(),
+    });
+
     loop {
-        class.wait_connection().await;
+        context.class.wait_connection().await;
         info!("Connected to USB host");
-        match serial_parser(&mut class).await {
+        match serial_parser(context).await {
             Ok(_) | Err(EndpointError::Disabled) => info!("Disconnected from USB host"),
             Err(err) => error!("Unexpected USB error {:?}", err),
         };
