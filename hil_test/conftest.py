@@ -54,8 +54,11 @@ class _ProbeRsThread(threading.Thread):
             self.exc_queue.put(e)
 
 
+# NOTE: Enable autouse here to rebuild/flash/run on every test invocation. This should really be a dependency of all
+#       other fixtures, but its convenient to leave the device running (without reflash/reset) while developing tests,
+#       and autouse makes this a lot easier to toggle. Pytest seems to run this fixture first when `autouse=True`.
 @pytest.fixture(autouse=False, scope="session")
-def probe_rs_fixture():
+def probe_rs_run():
     command_str = "cargo make run"
     stop_event = threading.Event()
     flash_done_event = threading.Event()
@@ -114,7 +117,6 @@ def ble_address(serial_usb):
 
     response = serial_usb.readline()
     address = bytes.decode(response).strip()
-
     return address
 
 
