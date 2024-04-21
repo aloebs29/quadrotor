@@ -91,7 +91,7 @@ impl Fxas21002 {
             .await?;
 
         // Configure
-        let ctrl0 = RegCtrl0::new().with_fs(0b01); // full scale range +/-100dps
+        let ctrl0 = RegCtrl0::new().with_fs(0b01); // full scale range +/-1000dps
         twim.write(DEVICE_ADDRESS, &[REG_ADDRESS_CTRL_REG0, ctrl0.into()])
             .await?;
 

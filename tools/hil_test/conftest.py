@@ -7,12 +7,11 @@ import time
 import bleak
 import pytest
 import pytest_asyncio
-import serial
-from serial.tools import list_ports
+
+from .. import utils
 
 FLASH_TIMEOUT = 20.0
 RESET_TIME = 2.0
-SERIAL_TIMEOUT = 2.0
 
 
 def pytest_addoption(parser):
@@ -105,31 +104,7 @@ def probe_rs_run(pytestconfig):
         stop_thread()
 
 
-@pytest.fixture(scope="session")
-def serial_usb():
-    dev = None
-    for port in list_ports.comports():
-        if port.vid == 0xFEED and port.pid == 0xFACE:
-            dev = port.device
-            break
-    else:
-        pytest.fail("Did not find USB device.")
-        
-    ser = serial.Serial(dev, baudrate=115200, timeout=SERIAL_TIMEOUT)
-    yield ser
-    ser.close()
-
-
-@pytest.fixture(scope="session")
-def ble_address(serial_usb):
-    serial_usb.write(b"mac_address\n")
-
-    response = serial_usb.readline()
-    address = bytes.decode(response).strip()
-    return address
-
-
 @pytest_asyncio.fixture(scope="session")
-async def ble_client(ble_address):
-    async with bleak.BleakClient(ble_address) as client:
+async def ble_client():
+    async with utils.get_ble_client() as client:
         yield client
