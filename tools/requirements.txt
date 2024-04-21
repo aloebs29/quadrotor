@@ -3,3 +3,4 @@ pytest-asyncio
 pyserial
 bleak
 dearpygui
+dearpygui-grid

@@ -6,6 +6,7 @@ import pathlib
 import platform
 
 import dearpygui.dearpygui as dpg
+import dearpygui_grid as dpg_grid
 
 from .utils import get_ble_client, Telemetry, TELEMETRY_CHARACTERISTIC
 
@@ -30,7 +31,11 @@ class _TelemetryReadProcess(Process):
             await ble_client.stop_notify(TELEMETRY_CHARACTERISTIC)
             
     def run(self):
-        asyncio.run(self.run_command())
+        try:
+            asyncio.run(self.run_command())
+        except BaseException as e:
+            self.stop_event.set()
+            raise e
 
 
 class TimeSeriesData:
@@ -48,11 +53,12 @@ class TimeSeriesData:
 
 
 class TimeSeriesPlot:
-    def __init__(self, height, ylabel, miny, maxy, xrange=10):
+    def __init__(self, label, ylabel, miny, maxy, xrange=10):
         self.series = []
         self.xrange = xrange
 
-        with dpg.plot(height=height, width=-1):
+        with dpg.plot(label=label) as plot:
+            self.plot = plot
             dpg.add_plot_legend()
             self.xaxis = dpg.add_plot_axis(dpg.mvXAxis, label="Time", time=True, no_tick_labels=True)
             self.yaxis = dpg.add_plot_axis(dpg.mvYAxis, label=ylabel)
@@ -69,7 +75,7 @@ class TimeSeriesPlot:
         dpg.set_axis_limits(self.xaxis, timestamp - self.xrange, timestamp)
 
 
-def run():
+def run_ui(stop_event, telemetry_queue):
     # Make fonts not blurry on Windows (TODO: Is this needed on mac/linux?)
     scale_factor = 1.0
     if platform.system() == "Windows":
@@ -84,51 +90,55 @@ def run():
         dpg.bind_font(default_font)
 
     # Setup plots
-    with dpg.window(tag="primary"):
-        error_count_plot = TimeSeriesPlot(100 * scale_factor, "Error count", 0, 100)
-        error_count_series = error_count_plot.add_series(None)
+    with dpg.window(tag="primary") as window:
+        grid = dpg_grid.Grid(2, 3, window)
 
-        battery_plot = TimeSeriesPlot(300 * scale_factor, "Battery level (V)", 0, 5)
-        battery_series = battery_plot.add_series(None)
-
-        accel_plot = TimeSeriesPlot(300 * scale_factor, "Acceleration (g)", -4, 4)
+        accel_plot = TimeSeriesPlot("Accelerometer Data", "Acceleration (g)", -4, 4)
         accel_x_series = accel_plot.add_series("X")
         accel_y_series = accel_plot.add_series("Y")
-        accel_z_series = accel_plot.add_series("Y")
+        accel_z_series = accel_plot.add_series("Z")
 
-        gyro_plot = TimeSeriesPlot(300 * scale_factor, "Angular velocity (dps)", -1000, 1000)
+        gyro_plot = TimeSeriesPlot("Gyroscope Data", "Angular velocity (dps)", -1000, 1000)
         gyro_x_series = gyro_plot.add_series("X")
-        gyro_y_series = gyro_plot.add_series("X")
-        gyro_z_series = gyro_plot.add_series("X")
+        gyro_y_series = gyro_plot.add_series("Y")
+        gyro_z_series = gyro_plot.add_series("Z")
 
-        mag_plot = TimeSeriesPlot(300 * scale_factor, "Magnetic field strength (uT)", -100, 100)
+        mag_plot = TimeSeriesPlot("Magnetometer Data", "Magnetic field strength (uT)", -100, 100)
         mag_x_series = mag_plot.add_series("X")
-        mag_y_series = mag_plot.add_series("X")
-        mag_z_series = mag_plot.add_series("X")
+        mag_y_series = mag_plot.add_series("Y")
+        mag_z_series = mag_plot.add_series("Z")
 
-        pressure_plot = TimeSeriesPlot(300 * scale_factor, "Pressure (kPa)", 75, 105)
+        error_count_plot = TimeSeriesPlot("Error Count", "Count", 0, 100)
+        error_count_series = error_count_plot.add_series(None)
+
+        battery_plot = TimeSeriesPlot("Battery Level Data", "Battery level (V)", 0, 5)
+        battery_series = battery_plot.add_series(None)
+
+        pressure_plot = TimeSeriesPlot("Pressure Sensor Data", "Pressure (kPa)", 75, 105)
         pressure_series = pressure_plot.add_series(None)
 
+        grid.push(accel_plot.plot, 0, 0)
+        grid.push(gyro_plot.plot, 0, 1)
+        grid.push(mag_plot.plot, 0, 2)
+        
+        grid.push(error_count_plot.plot, 1, 0)
+        grid.push(battery_plot.plot, 1, 1)
+        grid.push(pressure_plot.plot, 1, 2)
+
     # Finish setting up dear imgui
-    dpg.create_viewport(title='Updating plot data')
+    dpg.create_viewport(title="Quadrotor Telemetry Viewer")
     dpg.setup_dearpygui()
     dpg.show_viewport()
     dpg.maximize_viewport()
     dpg.set_primary_window("primary", True)
 
-    # Setup second process for receiving telemetry notifications over BLE. It may be overkill to use multiprocess here
-    # on top of asyncio (which bleak requires), but oh well.
-    stop_event = Event()
-    telemetry_queue = Queue()
-    telemetry_read_proc = _TelemetryReadProcess(stop_event, telemetry_queue)
+    with dpg.item_handler_registry() as window_hr:
+        dpg.add_item_visible_handler(callback=grid)
+    dpg.bind_item_handler_registry(window, window_hr)
 
-    telemetry_read_proc.start()
-
-    while dpg.is_dearpygui_running():
+    while dpg.is_dearpygui_running() and not stop_event.is_set():
         # TODO: Is there a less verbose way of doing this? The series need to be separate lists for the plots..
         new_timestamps = []
-        new_error_counts = []
-        new_battery_levels = []
 
         new_accel_x = []
         new_accel_y = []
@@ -142,14 +152,14 @@ def run():
         new_mag_y = []
         new_mag_z = []
 
+        new_error_counts = []
+        new_battery_levels = []
         new_pressure = []
 
         while not telemetry_queue.empty():
             t = telemetry_queue.get()
 
             new_timestamps.append(t.timestamp / 1000) # millis -> seconds
-            new_error_counts.append(t.error_count)
-            new_battery_levels.append(t.battery_voltage)
 
             new_accel_x.append(t.accel.x / 1000) # mg -> g
             new_accel_y.append(t.accel.y / 1000) # mg -> g
@@ -163,12 +173,11 @@ def run():
             new_mag_y.append(t.mag.y)
             new_mag_z.append(t.mag.z)
 
+            new_error_counts.append(t.error_count)
+            new_battery_levels.append(t.battery_voltage)
             new_pressure.append(t.pressure / 1000) # Pa -> kPa
 
         if len(new_timestamps) != 0:
-            error_count_series.extend_data(new_timestamps, new_error_counts)
-            battery_series.extend_data(new_timestamps, new_battery_levels)
-
             accel_x_series.extend_data(new_timestamps, new_accel_x)
             accel_y_series.extend_data(new_timestamps, new_accel_y)
             accel_z_series.extend_data(new_timestamps, new_accel_z)
@@ -181,23 +190,38 @@ def run():
             mag_y_series.extend_data(new_timestamps, new_mag_y)
             mag_z_series.extend_data(new_timestamps, new_mag_z)
 
+            error_count_series.extend_data(new_timestamps, new_error_counts)
+            battery_series.extend_data(new_timestamps, new_battery_levels)
             pressure_series.extend_data(new_timestamps, new_pressure)
 
             last_timestamp = new_timestamps[-1]
 
-            error_count_plot.update(last_timestamp)
-            battery_plot.update(last_timestamp)
             accel_plot.update(last_timestamp)
             gyro_plot.update(last_timestamp)
             mag_plot.update(last_timestamp)
+
+            error_count_plot.update(last_timestamp)
+            battery_plot.update(last_timestamp)
             pressure_plot.update(last_timestamp)
 
         dpg.render_dearpygui_frame()
 
-    stop_event.set()
-    telemetry_read_proc.join()
     dpg.destroy_context()
 
 
 if __name__ == "__main__":
-    run()
+    # Setup second process for receiving telemetry notifications over BLE. It may be overkill to use multiprocess here
+    # on top of asyncio (which bleak requires), but oh well.
+    stop_event = Event()
+    telemetry_queue = Queue()
+    telemetry_read_proc = _TelemetryReadProcess(stop_event, telemetry_queue)
+    telemetry_read_proc.start()
+
+    # NOTE: To profile, uncomment these lines. The plotting is a bit stuttery, but according to the profile the slowdown
+    #       happens in `render_dearpygui_frame`, so maybe we're just throwing too much data at it?
+    # import cProfile
+    # cProfile.run("run_ui(stop_event, telemetry_queue)", "program.prof")
+    run_ui(stop_event, telemetry_queue)
+
+    stop_event.set()
+    telemetry_read_proc.join()
