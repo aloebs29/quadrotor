@@ -123,10 +123,6 @@ def run():
     telemetry_read_proc = _TelemetryReadProcess(stop_event, telemetry_queue)
 
     telemetry_read_proc.start()
-    timestamp = 0
-    x = 0
-    y = 0
-    gyro_x_val = 0
 
     while dpg.is_dearpygui_running():
         # TODO: Is there a less verbose way of doing this? The series need to be separate lists for the plots..
