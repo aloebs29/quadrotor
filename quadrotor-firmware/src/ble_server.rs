@@ -4,7 +4,8 @@ use embassy_futures::select::{select, Either};
 use nrf_softdevice::ble::advertisement_builder::{
     Flag, LegacyAdvertisementBuilder, LegacyAdvertisementPayload, ServiceList, ServiceUuid16,
 };
-use nrf_softdevice::{ble, raw, Softdevice};
+use nrf_softdevice::raw::{self, ble_gap_conn_params_t};
+use nrf_softdevice::{ble, Softdevice};
 
 use defmt::*;
 
@@ -51,34 +52,40 @@ impl Server<'_> {
     }
 
     async fn update_input_values<'a>(&self, connection: &'a ble::Connection) {
+        // NOTE: Notifying the BLE client on every telemetry update (currently 100 Hz) seems to
+        const UPDATES_PER_NOTIFY: u32 = 5;
+        let mut iter_count = 0u32;
         loop {
             let telemetry = self.telemetry_signal.wait().await;
 
-            // Update battery service
-            let battery_percent =
-                lipo_1s_charge_percent_from_voltage(telemetry.battery_voltage) as u8;
-            let _ = self
-                .internal
-                .battery_service
-                .battery_level_set(&battery_percent);
+            if iter_count % UPDATES_PER_NOTIFY == 0 {
+                // Update battery service
+                let battery_percent =
+                    lipo_1s_charge_percent_from_voltage(telemetry.battery_voltage) as u8;
+                let _ = self
+                    .internal
+                    .battery_service
+                    .battery_level_set(&battery_percent);
 
-            // Notify telemetry service
-            // NOTE: Unwrap here as any runtime error just represents a programming error.
-            let telemetry_byte_array: &[u8; mem::size_of::<Telemetry>()] =
-                unwrap!(bytemuck::bytes_of(&telemetry).try_into());
-            match self
-                .internal
-                .telemetry_service
-                .telemetry_notify(connection, telemetry_byte_array)
-            {
-                Ok(_) => (),
-                Err(_) => {
-                    let _ = self
-                        .internal
-                        .telemetry_service
-                        .telemetry_set(telemetry_byte_array);
-                }
-            };
+                // Notify telemetry service
+                // NOTE: Unwrap here as any runtime error just represents a programming error.
+                let telemetry_byte_array: &[u8; mem::size_of::<Telemetry>()] =
+                    unwrap!(bytemuck::bytes_of(&telemetry).try_into());
+                match self
+                    .internal
+                    .telemetry_service
+                    .telemetry_notify(connection, telemetry_byte_array)
+                {
+                    Ok(_) => (),
+                    Err(_) => {
+                        let _ = self
+                            .internal
+                            .telemetry_service
+                            .telemetry_set(telemetry_byte_array);
+                    }
+                };
+            }
+            iter_count += 1;
         }
     }
 }
@@ -95,7 +102,7 @@ pub fn get_softdevice_config() -> nrf_softdevice::Config {
             conn_count: raw::BLE_GAP_CONN_COUNT_DEFAULT as u8,
             event_length: 24,
         }),
-        conn_gatt: Some(raw::ble_gatt_conn_cfg_t { att_mtu: 256 }),
+        conn_gatt: Some(raw::ble_gatt_conn_cfg_t { att_mtu: 128 }),
         gatts_attr_tab_size: Some(raw::ble_gatts_cfg_attr_tab_size_t {
             attr_tab_size: raw::BLE_GATTS_ATTR_TAB_SIZE_DEFAULT,
         }),
@@ -151,6 +158,13 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
                 continue;
             }
         };
+
+        let _ = conn.set_conn_params(ble_gap_conn_params_t {
+            min_conn_interval: 8,
+            max_conn_interval: 8,
+            slave_latency: 1,
+            conn_sup_timeout: 0xFFFF,
+        });
 
         info!("Connected to BLE client");
 
