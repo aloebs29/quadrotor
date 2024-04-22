@@ -1,9 +1,11 @@
 import asyncio
 from collections import deque
 import ctypes
-from multiprocessing import Event, Process, Queue
 import pathlib
 import platform
+from queue import Queue
+from threading import Event, Thread
+import time
 
 import dearpygui.dearpygui as dpg
 import dearpygui_grid as dpg_grid
@@ -13,9 +15,9 @@ from .utils import get_ble_client, Telemetry, TELEMETRY_CHARACTERISTIC
 ASSETS_DIR = pathlib.Path(__file__).parents[1] / "assets"
 
 
-class _TelemetryReadProcess(Process):
+class _TelemetryReadThread(Thread):
     def __init__(self, stop_event, queue, *args, **kwargs):
-        super(_TelemetryReadProcess, self).__init__(*args, **kwargs)
+        super(_TelemetryReadThread, self).__init__(*args, **kwargs)
         self.stop_event = stop_event
         self.queue = queue
 
@@ -53,9 +55,9 @@ class TimeSeriesData:
 
 
 class TimeSeriesPlot:
-    def __init__(self, label, ylabel, miny, maxy, xrange=10):
+    def __init__(self, label, ylabel, miny, maxy, time_axis_range=10):
         self.series = []
-        self.xrange = xrange
+        self.time_axis_range = time_axis_range
 
         with dpg.plot(label=label) as plot:
             self.plot = plot
@@ -69,10 +71,10 @@ class TimeSeriesPlot:
         self.series.append(series)
         return series
     
-    def update(self, timestamp):
+    def update(self, time_axis_end):
         for series in self.series:
             series.update()
-        dpg.set_axis_limits(self.xaxis, timestamp - self.xrange, timestamp)
+        dpg.set_axis_limits(self.xaxis, time_axis_end - self.time_axis_range, time_axis_end)
 
 
 def run_ui(stop_event, telemetry_queue):
@@ -136,6 +138,7 @@ def run_ui(stop_event, telemetry_queue):
         dpg.add_item_visible_handler(callback=grid)
     dpg.bind_item_handler_registry(window, window_hr)
 
+    timestamp_offset = None
     while dpg.is_dearpygui_running() and not stop_event.is_set():
         # TODO: Is there a less verbose way of doing this? The series need to be separate lists for the plots..
         new_timestamps = []
@@ -178,6 +181,10 @@ def run_ui(stop_event, telemetry_queue):
             new_pressure.append(t.pressure / 1000) # Pa -> kPa
 
         if len(new_timestamps) != 0:
+            # Establish time axis offset
+            if timestamp_offset is None:
+                timestamp_offset = new_timestamps[0] - time.time()
+
             accel_x_series.extend_data(new_timestamps, new_accel_x)
             accel_y_series.extend_data(new_timestamps, new_accel_y)
             accel_z_series.extend_data(new_timestamps, new_accel_z)
@@ -194,15 +201,15 @@ def run_ui(stop_event, telemetry_queue):
             battery_series.extend_data(new_timestamps, new_battery_levels)
             pressure_series.extend_data(new_timestamps, new_pressure)
 
-            last_timestamp = new_timestamps[-1]
+        if timestamp_offset is not None:
+            xaxis_end = time.time() + timestamp_offset
+            accel_plot.update(xaxis_end)
+            gyro_plot.update(xaxis_end)
+            mag_plot.update(xaxis_end)
 
-            accel_plot.update(last_timestamp)
-            gyro_plot.update(last_timestamp)
-            mag_plot.update(last_timestamp)
-
-            error_count_plot.update(last_timestamp)
-            battery_plot.update(last_timestamp)
-            pressure_plot.update(last_timestamp)
+            error_count_plot.update(xaxis_end)
+            battery_plot.update(xaxis_end)
+            pressure_plot.update(xaxis_end)
 
         dpg.render_dearpygui_frame()
 
@@ -210,18 +217,16 @@ def run_ui(stop_event, telemetry_queue):
 
 
 if __name__ == "__main__":
-    # Setup second process for receiving telemetry notifications over BLE. It may be overkill to use multiprocess here
-    # on top of asyncio (which bleak requires), but oh well.
+    # Setup second thread for receiving telemetry notifications over BLE.
     stop_event = Event()
     telemetry_queue = Queue()
-    telemetry_read_proc = _TelemetryReadProcess(stop_event, telemetry_queue)
-    telemetry_read_proc.start()
+    telemetry_read_thread = _TelemetryReadThread(stop_event, telemetry_queue)
+    telemetry_read_thread.start()
 
-    # NOTE: To profile, uncomment these lines. The plotting is a bit stuttery, but according to the profile the slowdown
-    #       happens in `render_dearpygui_frame`, so maybe we're just throwing too much data at it?
+    # NOTE: To profile, uncomment these lines.
     # import cProfile
     # cProfile.run("run_ui(stop_event, telemetry_queue)", "program.prof")
     run_ui(stop_event, telemetry_queue)
 
     stop_event.set()
-    telemetry_read_proc.join()
+    telemetry_read_thread.join()
