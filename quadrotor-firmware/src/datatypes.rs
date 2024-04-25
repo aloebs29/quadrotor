@@ -2,7 +2,7 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::signal::Signal;
 
 use bytemuck::{Pod, Zeroable};
-use micromath::vector::F32x3;
+use micromath::{vector::F32x3, Quaternion};
 
 // TODO: Is this needed? Need a packed version of micromath's F32x3 for serialization.
 #[repr(C, packed)]
@@ -23,6 +23,27 @@ impl From<F32x3> for FlatVec3F32 {
     }
 }
 
+// TODO: Is this needed? Need a packed version of micromath's Quaternion for serialization.
+#[repr(C, packed)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Pod, Zeroable)]
+pub struct FlatQuaternion {
+    pub w: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl From<Quaternion> for FlatQuaternion {
+    fn from(value: Quaternion) -> Self {
+        Self {
+            w: value.w(),
+            x: value.x(),
+            y: value.y(),
+            z: value.z(),
+        }
+    }
+}
+
 #[repr(C, packed)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct Telemetry {
@@ -36,7 +57,9 @@ pub struct Telemetry {
     pub gyro: FlatVec3F32,
     pub mag: FlatVec3F32,
     pub pressure: f32,
+
     // TODO: Orientation/position
+    pub orientation: FlatQuaternion,
 }
 
 pub type TelemetrySignal = Signal<NoopRawMutex, Telemetry>;

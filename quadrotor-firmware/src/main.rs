@@ -18,6 +18,7 @@ use nrf_softdevice::{SocEvent, Softdevice};
 
 use defmt::{info, unwrap};
 use micromath::vector::F32x3;
+use micromath::Quaternion;
 use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
@@ -27,9 +28,13 @@ use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::usb_serial;
 
+use quadrotor_x::sensor_fusion;
+
 const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
 const VBAT_DIVIDER: f32 = 568.75;
+
+const DEGREES_TO_RADIANS: f32 = 0.01745329;
 
 bind_interrupts!(struct I2cIrqs {
     SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0 => twim::InterruptHandler<peripherals::TWISPI0>;
@@ -107,6 +112,8 @@ async fn main(spawner: Spawner) {
     let mut gyro_msmt = F32x3::default();
     let mut adc_msmt_buf = [0i16; 1];
 
+    let mut orientation = Quaternion::default();
+
     // NOTE: We don't want to start running the control loop with some default pressure measurement, because then our
     // intial altitude will be way off. Wait until the pressure sensor returns a valid reading.
     let initial_pressure_timeout =
@@ -151,6 +158,19 @@ async fn main(spawner: Spawner) {
             Err(_) => error_count += 1,
         }
 
+        led.set_low();
+        // ==============
+
+        // Compute orientation
+        if let Some(new_orientation) = sensor_fusion::madgwick_fusion_9(
+            orientation.clone(),
+            accel_msmt.clone(),
+            gyro_msmt.clone() * DEGREES_TO_RADIANS,
+            mag_msmt.clone(),
+            MAIN_LOOP_INTERVAL_MS as u32,
+        ) {
+            orientation = new_orientation;
+        }
         telemetry_signal.signal(Telemetry {
             timestamp,
             error_count,
@@ -159,9 +179,8 @@ async fn main(spawner: Spawner) {
             gyro: gyro_msmt.into(),
             mag: mag_msmt.into(),
             pressure: pressure_msmt.into(),
+            orientation: orientation.into(),
         });
-        led.set_low();
-        // ==============
     }
 }
 
