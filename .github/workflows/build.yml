@@ -1,0 +1,23 @@
+name: Build
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+jobs:
+  BuildFirmware:
+    name: Build Firmware
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aloebs29/rust-thumbv7em-none-eabihf:1.75
+      credentials:
+        username: aloebs29
+        password: ${{ secrets.GHCR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Rust Build
+        working-directory: ./quadrotor-firmware
+        run: cargo build
