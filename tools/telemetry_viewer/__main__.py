@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import ctypes
 import math
@@ -7,14 +8,16 @@ from queue import Queue
 from threading import Event, Thread
 import time
 
+from ahrs.filters import Madgwick
 import dearpygui.dearpygui as dpg
 import dearpygui_grid as dpg_grid
 
-from ..utils import get_ble_client, Telemetry, TELEMETRY_CHARACTERISTIC
+from ..utils import get_ble_client, Telemetry, TELEMETRY_CHARACTERISTIC, Quaternion
 from .plot import TimeSeriesPlot
 from .rot_viz import RotationVisualizer
 
 ASSETS_DIR = pathlib.Path(__file__).parents[2] / "assets"
+DEGREES_TO_RADIANS = 0.01745329
 
 
 class _TelemetryReadThread(Thread):
@@ -42,7 +45,7 @@ class _TelemetryReadThread(Thread):
             raise e
 
 
-def run_ui(stop_event, telemetry_queue):
+def run_ui(stop_event, telemetry_queue, use_host_orientation):
     # Make fonts not blurry on Windows (TODO: Is this needed on mac/linux?)
     scale_factor = 1.0
     if platform.system() == "Windows":
@@ -116,6 +119,10 @@ def run_ui(stop_event, telemetry_queue):
     dpg.bind_item_handler_registry(window, window_hr)
 
     timestamp_offset = None
+    q = Quaternion(1.0, 0.0, 0.0, 0.0)
+    madgwick = Madgwick()
+    last_timestamp = None
+
     while dpg.is_dearpygui_running() and not stop_event.is_set():
         # Read new queue items
         while not telemetry_queue.empty():
@@ -130,21 +137,31 @@ def run_ui(stop_event, telemetry_queue):
             dpg.set_value(error_count_label, f"Error count: {t.error_count}")
             dpg.set_value(battery_level_label, f"Battery level: {t.battery_voltage:.2f}V")
 
+            # Update host-side orientation if thats what we're using
+            if use_host_orientation:
+                if last_timestamp is not None:
+                    try:
+                        madgwick.Dt = new_timestamp - last_timestamp
+                        q = Quaternion(*madgwick.updateMARG(q.as_array(), t.gyro.scale(DEGREES_TO_RADIANS).as_array(),
+                                                            t.accel.as_array(), t.mag.as_array()))
+                    except ZeroDivisionError:
+                        pass
+            else:
+                q = t.orientation
+
             # Update orientation plot and rotation visualizer
-            qw = t.orientation.w
-            qx = t.orientation.x
-            qy = t.orientation.y
-            qz = t.orientation.z
+            try:
+                q_axis_mag = math.sqrt(q.x * q.x + q.y * q.y + q.z * q.z)
+                theta = 2 * math.atan2(q_axis_mag, q.w)
 
-            q_mag = math.sqrt(qx * qx + qy * qy + qz * qz)
-            theta = 2 * math.atan2(q_mag, qw)
+                rot_visualizer.transform([q.x / q_axis_mag, q.y / q_axis_mag, q.z / q_axis_mag], theta)
+            except ZeroDivisionError:
+                pass
 
-            rot_visualizer.transform([qx / q_mag, qy / q_mag, qz / q_mag], theta)
-
-            orientation_w_series.append_data(new_timestamp, qw)
-            orientation_x_series.append_data(new_timestamp, qx)
-            orientation_y_series.append_data(new_timestamp, qy)
-            orientation_z_series.append_data(new_timestamp, qz)
+            orientation_w_series.append_data(new_timestamp, q.w)
+            orientation_x_series.append_data(new_timestamp, q.x)
+            orientation_y_series.append_data(new_timestamp, q.y)
+            orientation_z_series.append_data(new_timestamp, q.z)
 
             # Update other plots
             accel_x_series.append_data(new_timestamp, t.accel.x / 1000) # mg -> g
@@ -160,6 +177,9 @@ def run_ui(stop_event, telemetry_queue):
             mag_z_series.append_data(new_timestamp, t.mag.z)
 
             pressure_series.append_data(new_timestamp, t.pressure / 1000) # Pa -> kPa
+
+            # Update last timestamp (for host side orientation calcs)
+            last_timestamp = new_timestamp
 
         # Shift timeseries plots X-values
         if timestamp_offset is not None:
@@ -181,6 +201,12 @@ def run_ui(stop_event, telemetry_queue):
 
 
 if __name__ == "__main__":
+    # Parse CLI arguments
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use-host-orientation", action="store_true",
+                        help="Calculate orientation on the host rather than using values calculated on target device.")
+    args = parser.parse_args()
+
     # Setup second thread for receiving telemetry notifications over BLE.
     stop_event = Event()
     telemetry_queue = Queue()
@@ -191,7 +217,7 @@ if __name__ == "__main__":
     # import cProfile
     # cProfile.run("run_ui(stop_event, telemetry_queue)", "program.prof")
     try:
-        run_ui(stop_event, telemetry_queue)
+        run_ui(stop_event, telemetry_queue, args.use_host_orientation)
     finally:
         stop_event.set()
         telemetry_read_thread.join()

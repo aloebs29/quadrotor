@@ -4,6 +4,7 @@ import math
 import struct
 
 import bleak
+import numpy as np
 import serial
 from serial.tools import list_ports
 
@@ -47,6 +48,12 @@ class Vec3:
 
     def magnitude(self):
         return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+    
+    def scale(self, factor):
+        return Vec3(self.x * factor, self.y * factor, self.z * factor)
+    
+    def as_array(self):
+        return np.array([self.x, self.y, self.z])
 
 
 @dataclass
@@ -55,6 +62,9 @@ class Quaternion:
     x: float
     y: float
     z: float
+    
+    def as_array(self):
+        return np.array([self.w, self.x, self.y, self.z])
 
 
 class Telemetry:
