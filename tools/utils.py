@@ -49,9 +49,17 @@ class Vec3:
         return math.sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
 
 
+@dataclass
+class Quaternion:
+    w: float
+    x: float
+    y: float
+    z: float
+
+
 class Telemetry:
     def __init__(self, packed_bytes):
-        t = struct.unpack("<QIfffffffffff", packed_bytes)
+        t = struct.unpack("<QIfffffffffffffff", packed_bytes)
         self.timestamp = t[0] # millis
         self.error_count = t[1]
         self.battery_voltage = t[2] # V
@@ -59,3 +67,4 @@ class Telemetry:
         self.gyro  = Vec3(t[6], t[7], t[8]) # dps
         self.mag   = Vec3(t[9], t[10], t[11]) # uT
         self.pressure = t[12] # Pa
+        self.orientation = Quaternion(t[13], t[14], t[15], t[16])
