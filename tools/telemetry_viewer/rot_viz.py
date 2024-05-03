@@ -10,11 +10,11 @@ import dearpygui.dearpygui as dpg
 
 SIZE = 5
 VERTICES = [
-        [-SIZE, -SIZE, -SIZE],  # 0 near side
+        [-SIZE, -SIZE, -SIZE],  # 0 rear side
         [ SIZE, -SIZE, -SIZE],  # 1
         [-SIZE,  SIZE, -SIZE],  # 2
         [ SIZE,  SIZE, -SIZE],  # 3
-        [-SIZE, -SIZE,  SIZE],  # 4 far side
+        [-SIZE, -SIZE,  SIZE],  # 4 front side
         [ SIZE, -SIZE,  SIZE],  # 5
         [-SIZE,  SIZE,  SIZE],  # 6
         [ SIZE,  SIZE,  SIZE],  # 7
@@ -72,6 +72,9 @@ class RotationVisualizer:
         self.transform([1.0, 0.0, 0.0], 0)
 
     def transform(self, axis, rotation):
+        # Orient the sensor's axes to make the cube face the camera when the sensor is pointing North
+        axis = [axis[1], axis[2], axis[0]]
+
         model = dpg.create_rotation_matrix(rotation, axis)
         dpg.apply_transform(self.cube, self.proj * self.view * model)
 
