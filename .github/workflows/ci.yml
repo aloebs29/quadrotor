@@ -1,4 +1,4 @@
-name: Build
+name: CI
 
 on:
   workflow_call:
@@ -21,3 +21,17 @@ jobs:
       - name: Run Rust Build
         working-directory: ./quadrotor-firmware
         run: cargo build
+
+  RunUnitTests:
+    name: Run Unit Tests
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aloebs29/rust-thumbv7em-none-eabihf:1.75
+      credentials:
+        username: aloebs29
+        password: ${{ secrets.GHCR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Rust Tests
+        working-directory: ./quadrotor-x
+        run: cargo test
