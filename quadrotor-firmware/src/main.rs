@@ -162,15 +162,13 @@ async fn main(spawner: Spawner) {
         // ==============
 
         // Compute orientation
-        if let Some(new_orientation) = sensor_fusion::madgwick_fusion_9(
-            orientation.clone(),
-            accel_msmt.clone(),
-            gyro_msmt.clone() * DEGREES_TO_RADIANS,
-            mag_msmt.clone(),
+        orientation = sensor_fusion::madgwick_fusion_6(
+            orientation,
+            accel_msmt,
+            gyro_msmt * DEGREES_TO_RADIANS,
+            // mag_msmt,
             MAIN_LOOP_INTERVAL_MS as u32,
-        ) {
-            orientation = new_orientation;
-        }
+        );
         telemetry_signal.signal(Telemetry {
             timestamp,
             error_count,
@@ -178,7 +176,7 @@ async fn main(spawner: Spawner) {
             accel: accel_msmt.into(),
             gyro: gyro_msmt.into(),
             mag: mag_msmt.into(),
-            pressure: pressure_msmt.into(),
+            pressure: pressure_msmt,
             orientation: orientation.into(),
         });
     }

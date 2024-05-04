@@ -1,13 +1,22 @@
 use micromath::vector::{F32x3, Vector};
 use micromath::{Quaternion, F32};
 
-const BETA: f32 = 0.041;
+// NOTE: Only use micromath f32::sqrt function on target. Unit tests need to use more accurate sqrt function found in
+//       std.
+#[cfg(not(feature = "std"))]
+use micromath::F32Ext;
+
+const BETA_IMU: f32 = 0.031;
+const BETA_MARG: f32 = 0.041;
+
+fn vec3_norm(v: F32x3) -> f32 {
+    v.iter().map(|n| n * n).sum()
+}
 
 fn try_normalize_vec3(v: F32x3) -> Option<F32x3> {
     let magnitude = v.magnitude();
     if magnitude.is_normal() {
-        let n: f32 = F32(magnitude).inv().into();
-        Some(v * n)
+        Some(v * (1. / magnitude))
     } else {
         None
     }
@@ -18,8 +27,7 @@ fn try_normalize_quat(q: Quaternion) -> Option<Quaternion> {
     if norm == 0.0 {
         None
     } else {
-        let n = F32(norm).invsqrt();
-        Some(q.scale(n))
+        Some(q.scale(1. / norm.sqrt()))
     }
 }
 
@@ -28,53 +36,47 @@ pub fn madgwick_fusion_6(
     accel: F32x3,
     gyro: F32x3,
     time_diff_ms: u32,
-) -> Option<Quaternion> {
-    // rate of change of quaternion from gyroscope
-    let mut q_dot = Quaternion::new(
-        qlast.w() * gyro.x + qlast.y() * gyro.z - qlast.z() * gyro.y,
-        qlast.w() * gyro.y - qlast.x() * gyro.z + qlast.z() * gyro.x,
-        qlast.w() * gyro.z + qlast.x() * gyro.y - qlast.y() * gyro.x,
-        -qlast.x() * gyro.x - qlast.y() * gyro.y - qlast.z() * gyro.z,
-    );
-    q_dot *= 0.5;
+) -> Quaternion {
+    // Compute derivative using last estimate and gyro
+    let mut q_dot = 0.5 * (qlast * Quaternion::new(0., gyro.x, gyro.y, gyro.z));
 
-    // normalize accel
-    let accel = try_normalize_vec3(accel)?;
+    // Normalize accel data
+    if let Some(a_hat) = try_normalize_vec3(accel) {
+        // Objective function
+        let f = F32x3 {
+            x: 2. * (qlast.x() * qlast.z() - qlast.w() * qlast.y()),
+            y: 2. * (qlast.w() * qlast.x() + qlast.y() * qlast.z()),
+            z: 2. * (0.5 - qlast.x() * qlast.x() - qlast.y() * qlast.y()),
+        } - a_hat;
 
-    let qw_2 = 2.0 * qlast.w();
-    let qx_2 = 2.0 * qlast.x();
-    let qy_2 = 2.0 * qlast.y();
-    let qz_2 = 2.0 * qlast.z();
-    let qw_4 = 4.0 * qlast.w();
-    let qx_4 = 4.0 * qlast.x();
-    let qy_4 = 4.0 * qlast.y();
-    let qx_8 = 8.0 * qlast.x();
-    let qy_8 = 8.0 * qlast.y();
-    let qw_qw = qlast.w() * qlast.w();
-    let qx_qx = qlast.x() * qlast.x();
-    let qy_qy = qlast.y() * qlast.y();
-    let qz_qz = qlast.z() * qlast.z();
+        if vec3_norm(f) > 0. {
+            // Jacobian
+            #[rustfmt::skip]
+            let j = (
+                (-2. * qlast.y(), 2. * qlast.z(), -2. * qlast.w(), 2. * qlast.x()),
+                (2. * qlast.x(), 2. * qlast.w(), 2. * qlast.z(), 2. * qlast.y()),
+                (0., -4. * qlast.x(), -4. * qlast.y(), 0.)
+            );
 
-    // gradient decent algorithm corrective step
-    let step = Quaternion::new(
-        qx_4 * qz_qz - qz_2 * accel.x + 4.0 * qw_qw * qlast.x() - qw_2 * accel.y - qx_4
-            + qx_8 * qx_qx
-            + qx_8 * qy_qy
-            + qx_4 * accel.z,
-        4.0 * qw_qw * qlast.y() + qw_2 * accel.x + qy_4 * qz_qz - qz_2 * accel.y - qy_4
-            + qy_8 * qx_qx
-            + qy_8 * qy_qy
-            + qy_4 * accel.z,
-        4.0 * qx_qx * qlast.z() - qx_2 * accel.x + 4.0 * qy_qy * qlast.z() - qy_2 * accel.y,
-        qw_4 * qy_qy + qy_2 * accel.x + qw_4 * qx_qx - qx_2 * accel.y,
-    );
-    let step = try_normalize_quat(step)?;
+            // Objective function gradient (J.T * f)
+            let gradient = Quaternion::new(
+                j.0 .0 * f.x + j.1 .0 * f.y + j.2 .0 * f.z,
+                j.0 .1 * f.x + j.1 .1 * f.y + j.2 .1 * f.z,
+                j.0 .2 * f.x + j.1 .2 * f.y + j.2 .2 * f.z,
+                j.0 .3 * f.x + j.1 .3 * f.y + j.2 .3 * f.z,
+            );
+            if let Some(gradient_hat) = try_normalize_quat(gradient) {
+                q_dot -= gradient_hat.scale(BETA_IMU);
+            }
+        }
+    }
 
-    // apply feedback step
-    q_dot -= BETA * step;
-
-    // integrate rate of change of quaternion to yield quaternion
-    try_normalize_quat(qlast + q_dot.scale(time_diff_ms as f32 * 0.001))
+    let qnew = qlast + q_dot.scale(time_diff_ms as f32 * 0.001);
+    if let Some(qnew_hat) = try_normalize_quat(qnew) {
+        qnew_hat
+    } else {
+        qlast
+    }
 }
 
 pub fn madgwick_fusion_9(
@@ -174,7 +176,7 @@ pub fn madgwick_fusion_9(
     let step = try_normalize_quat(Quaternion::new(sx, sy, sz, sw))?;
 
     // apply feedback step
-    q_dot -= BETA * step;
+    q_dot -= BETA_MARG * step;
 
     // integrate rate of change of quaternion to yield quaternion
     try_normalize_quat(qlast + q_dot.scale(time_diff_ms as f32 * 0.001))
@@ -183,85 +185,118 @@ pub fn madgwick_fusion_9(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_float_eq::*;
+
+    fn madgwick_fusion_6_matches_expected(
+        qlast: Quaternion,
+        accel: F32x3,
+        gyro: F32x3,
+        time_diff_ms: u32,
+        expected: Quaternion,
+    ) {
+        let actual = madgwick_fusion_6(qlast, accel, gyro, time_diff_ms);
+        assert_float_absolute_eq!(actual.w(), expected.w(), 0.001);
+        assert_float_absolute_eq!(actual.x(), expected.x(), 0.001);
+        assert_float_absolute_eq!(actual.y(), expected.y(), 0.001);
+        assert_float_absolute_eq!(actual.z(), expected.z(), 0.001);
+    }
 
     #[test]
-    fn madgwick_fusion_9_handles_normalization_failures() {
-        let q = Quaternion::IDENTITY;
+    fn madgwick_fusion_6_works() {
+        // NOTE: These values are generated against the python `ahrs` library. To generate, run (from the repo root):
+        //       python -m tools.gen_test_values
+        madgwick_fusion_6_matches_expected(
+            Quaternion::new(
+                0.22851365164234216,
+                -0.7784839644560404,
+                -0.36871586051277133,
+                -0.45364395984540035,
+            ),
+            F32x3::from((0.4729424283280248, 0.3533989748458226, 0.7843591354096908)),
+            F32x3::from((-4.130611673705839, -0.7807818031472955, -4.702027805619297)),
+            10,
+            Quaternion::new(
+                0.2002324762749464,
+                -0.7758507395147014,
+                -0.3783513039692044,
+                -0.4634791000941646,
+            ),
+        );
 
-        // Accel is zero
-        assert!(madgwick_fusion_9(
-            q,
-            F32x3 {
-                x: 0.,
-                y: 0.,
-                z: 0.
-            },
-            F32x3::default(),
-            F32x3 {
-                x: 1.,
-                y: 0.,
-                z: 0.
-            },
-            10
-        )
-        .is_none());
+        madgwick_fusion_6_matches_expected(
+            Quaternion::new(
+                -0.4482127280968318,
+                0.008531031466940495,
+                -0.7542332855174314,
+                -0.47975485707982823,
+            ),
+            F32x3::from((0.2997688755590464, 0.08988296120643335, -0.5591187559186066)),
+            F32x3::from((0.8926568387590876, 3.0943045667782663, -4.93501240321939)),
+            10,
+            Quaternion::new(
+                -0.4480066645710422,
+                0.032465535695588216,
+                -0.762951802954038,
+                -0.46490919958752264,
+            ),
+        );
 
-        // Mag is zero
-        assert!(madgwick_fusion_9(
-            q,
-            F32x3 {
-                x: 0.,
-                y: 0.,
-                z: -1.
-            },
-            F32x3::default(),
-            F32x3 {
-                x: 0.,
-                y: 0.,
-                z: 0.
-            },
-            10
-        )
-        .is_none());
+        madgwick_fusion_6_matches_expected(
+            Quaternion::new(
+                0.5810664407598567,
+                0.3764712402182691,
+                -0.3035291703311852,
+                -0.6546000607006179,
+            ),
+            F32x3::from((
+                0.9144261444135624,
+                -0.32681090977474647,
+                -0.8145083132397042,
+            )),
+            F32x3::from((-4.03283623166536, 3.4749436634745976, 1.0372603136689111)),
+            10,
+            Quaternion::new(
+                0.5971602563518745,
+                0.3743683825388972,
+                -0.28231785694693723,
+                -0.6508030193828714,
+            ),
+        );
 
-        // Gradient descent step is zero
-        assert!(madgwick_fusion_9(
-            q,
-            F32x3 {
-                x: 0.,
-                y: 0.,
-                z: -1.
-            },
-            F32x3::default(),
-            F32x3 {
-                x: 1.,
-                y: 0.,
-                z: 0.
-            },
-            10
-        )
-        .is_none());
+        madgwick_fusion_6_matches_expected(
+            Quaternion::new(
+                0.5033838216652086,
+                0.3765308335536987,
+                0.05937791051822774,
+                0.7754376333475025,
+            ),
+            F32x3::from((-0.24293124558329304, 0.104081262546454, 0.6588093285059897)),
+            F32x3::from((1.1851975236424606, 3.6170690031077726, 0.7735214525676204)),
+            10,
+            Quaternion::new(
+                0.49706503734627755,
+                0.3654170277320329,
+                0.07167057837238784,
+                0.7837474546607458,
+            ),
+        );
 
-        // Normal case (no normalization failure)
-        assert!(madgwick_fusion_9(
-            q,
-            F32x3 {
-                x: 0.,
-                y: 0.1,
-                z: -9.
-            },
-            F32x3 {
-                x: 0.01,
-                y: 0.01,
-                z: 0.01
-            },
-            F32x3 {
-                x: 1.,
-                y: 0.,
-                z: 0.
-            },
-            10
-        )
-        .is_some());
+        madgwick_fusion_6_matches_expected(
+            Quaternion::new(
+                0.3379059785855432,
+                -0.7501944496860815,
+                -0.449449939649466,
+                -0.3478830105731456,
+            ),
+            F32x3::from((-0.840416046152745, -0.5344182272779396, -0.7979971411805418)),
+            F32x3::from((-2.220263968899079, 1.356844442644002, -1.3516782102991574)),
+            10,
+            Quaternion::new(
+                0.3302050595325292,
+                -0.7485793464062754,
+                -0.44831175059101874,
+                -0.3600141039946748,
+            ),
+        );
     }
 }

@@ -63,6 +63,10 @@ class Quaternion:
     y: float
     z: float
     
+    def normalize(self):
+        a = self.as_array()
+        return Quaternion(*(a / np.linalg.norm(a)))
+
     def as_array(self):
         return np.array([self.w, self.x, self.y, self.z])
 
