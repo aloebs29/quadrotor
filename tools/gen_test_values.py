@@ -34,13 +34,12 @@ def make_random_input(include_mag=False):
 
 
 if __name__ == "__main__":
-    madgwick = Madgwick(gain=0.033)
-
     # Make outputs repeatable
     random.seed(42)
 
     # Madgwick fusion 6 test values
     print("***\nMadgwick fusion 6 test values\n***\n")
+    madgwick = Madgwick(gain=0.033)
     for _ in range(5):
         input = make_random_input()
 
@@ -55,6 +54,29 @@ if __name__ == "__main__":
                f"   Quaternion::new({input.qlast.w}, {input.qlast.x}, {input.qlast.y}, {input.qlast.z}),\n"
                f"   F32x3::from(({input.accel.x}, {input.accel.y}, {input.accel.z})),\n"
                f"   F32x3::from(({input.gyro.x}, {input.gyro.y}, {input.gyro.z})),\n"
+               f"   {input.time_diff_ms},\n"
+               f"   Quaternion::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
+               f");\n"))
+
+    # Madgwick fusion 9 test values
+    print("***\nMadgwick fusion 9 test values\n***\n")
+    madgwick = Madgwick(gain=0.041)
+    for _ in range(5):
+        input = make_random_input(include_mag=True)
+
+        madgwick.Dt = input.time_diff_ms * 0.001
+        output = madgwick.updateMARG(
+            input.qlast.as_array(),
+            input.gyro.as_array(),
+            input.accel.as_array(),
+            input.mag.as_array())
+        output = Quaternion(*output)
+        
+        print((f"madgwick_fusion_9_matches_expected(\n"
+               f"   Quaternion::new({input.qlast.w}, {input.qlast.x}, {input.qlast.y}, {input.qlast.z}),\n"
+               f"   F32x3::from(({input.accel.x}, {input.accel.y}, {input.accel.z})),\n"
+               f"   F32x3::from(({input.gyro.x}, {input.gyro.y}, {input.gyro.z})),\n"
+               f"   F32x3::from(({input.mag.x}, {input.mag.y}, {input.mag.z})),\n"
                f"   {input.time_diff_ms},\n"
                f"   Quaternion::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
                f");\n"))

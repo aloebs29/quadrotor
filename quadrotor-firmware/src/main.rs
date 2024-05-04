@@ -162,11 +162,11 @@ async fn main(spawner: Spawner) {
         // ==============
 
         // Compute orientation
-        orientation = sensor_fusion::madgwick_fusion_6(
+        orientation = sensor_fusion::madgwick_fusion_9(
             orientation,
             accel_msmt,
             gyro_msmt * DEGREES_TO_RADIANS,
-            // mag_msmt,
+            mag_msmt,
             MAIN_LOOP_INTERVAL_MS as u32,
         );
         telemetry_signal.signal(Telemetry {
