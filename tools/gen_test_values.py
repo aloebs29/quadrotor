@@ -14,7 +14,7 @@ class TestInput:
     accel: Vec3
     gyro: Vec3
     mag: typing.Optional[Vec3] = None
-    time_diff_ms: int = 10
+    delta_t: float = 0.01
 
 
 def make_random_vec3(low, hi):
@@ -43,7 +43,7 @@ if __name__ == "__main__":
     for _ in range(5):
         input = make_random_input()
 
-        madgwick.Dt = input.time_diff_ms * 0.001
+        madgwick.Dt = input.delta_t
         output = madgwick.updateIMU(
             input.qlast.as_array(),
             input.gyro.as_array(),
@@ -54,7 +54,7 @@ if __name__ == "__main__":
                f"   Quaternion::new({input.qlast.w}, {input.qlast.x}, {input.qlast.y}, {input.qlast.z}),\n"
                f"   F32x3::from(({input.accel.x}, {input.accel.y}, {input.accel.z})),\n"
                f"   F32x3::from(({input.gyro.x}, {input.gyro.y}, {input.gyro.z})),\n"
-               f"   {input.time_diff_ms},\n"
+               f"   {input.delta_t},\n"
                f"   Quaternion::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
                f");\n"))
 
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     for _ in range(5):
         input = make_random_input(include_mag=True)
 
-        madgwick.Dt = input.time_diff_ms * 0.001
+        madgwick.Dt = input.delta_t
         output = madgwick.updateMARG(
             input.qlast.as_array(),
             input.gyro.as_array(),
@@ -77,6 +77,6 @@ if __name__ == "__main__":
                f"   F32x3::from(({input.accel.x}, {input.accel.y}, {input.accel.z})),\n"
                f"   F32x3::from(({input.gyro.x}, {input.gyro.y}, {input.gyro.z})),\n"
                f"   F32x3::from(({input.mag.x}, {input.mag.y}, {input.mag.z})),\n"
-               f"   {input.time_diff_ms},\n"
+               f"   {input.delta_t},\n"
                f"   Quaternion::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
                f");\n"))

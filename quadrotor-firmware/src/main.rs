@@ -35,6 +35,7 @@ const MAIN_LOOP_INTERVAL_MS: u64 = 10;
 const VBAT_DIVIDER: f32 = 568.75;
 
 const DEGREES_TO_RADIANS: f32 = 0.01745329;
+const MS_TO_SEC: f32 = 0.001;
 
 bind_interrupts!(struct I2cIrqs {
     SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0 => twim::InterruptHandler<peripherals::TWISPI0>;
@@ -167,7 +168,7 @@ async fn main(spawner: Spawner) {
             accel_msmt,
             gyro_msmt * DEGREES_TO_RADIANS,
             mag_msmt,
-            MAIN_LOOP_INTERVAL_MS as u32,
+            MAIN_LOOP_INTERVAL_MS as f32 * MS_TO_SEC,
         );
         telemetry_signal.signal(Telemetry {
             timestamp,
