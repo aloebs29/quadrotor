@@ -8,6 +8,7 @@ use micromath::F32Ext;
 
 const BETA_IMU: f32 = 0.031;
 const BETA_MARG: f32 = 0.041;
+const G_TO_MPS2: f32 = 9.80665;
 
 fn vec3_norm(v: F32x3) -> f32 {
     v.iter().map(|n| n * n).sum()
@@ -93,9 +94,9 @@ pub fn madgwick_fusion_9(
     // Normalize accel data
     if let Some(a_hat) = try_normalize_vec3(accel) {
         // Rotate mag vector and eliminate y-component
-        let h = q * Quaternion::new(0., m_hat.x, m_hat.y, m_hat.z) * q.conj();
-        let bx = (h.x() * h.x() + h.y() * h.y()).sqrt();
-        let bz = h.z();
+        let h = q.rotate(m_hat);
+        let bx = (h.x * h.x + h.y * h.y).sqrt();
+        let bz = h.z;
 
         // Objective functions
         let fg = F32x3 {
@@ -164,8 +165,31 @@ pub fn madgwick_fusion_9(
     }
 }
 
+pub fn dead_reckon_estimate(
+    last_velocity: F32x3,
+    last_displacement: F32x3,
+    orientation: Quaternion,
+    accel: F32x3,
+    delta_t: f32,
+) -> (F32x3, F32x3) {
+    // Rotate acceleration vector by our orientation
+    let accel = orientation.rotate(accel);
+
+    // Subtract gravity
+    let accel = accel - orientation.rotate(F32x3::from((0., 0., G_TO_MPS2)));
+
+    // Integrate accelerometer measurement
+    let new_velocity = last_velocity + accel * delta_t;
+    let avg_velocity = (last_velocity + new_velocity) * 0.5;
+    let new_displacement = last_displacement + avg_velocity * delta_t;
+
+    (new_velocity, new_displacement)
+}
+
 #[cfg(test)]
 mod tests {
+    use core::f32::consts::PI;
+
     use super::*;
     use assert_float_eq::*;
 
@@ -409,5 +433,41 @@ mod tests {
                 0.43922829287612003,
             ),
         );
+    }
+
+    fn check_f32x3_near(expected: F32x3, actual: F32x3) {
+        assert_float_absolute_eq!(expected.x, actual.x, 0.002);
+        assert_float_absolute_eq!(expected.y, actual.y, 0.002);
+        assert_float_absolute_eq!(expected.z, actual.z, 0.002);
+    }
+
+    #[test]
+    fn dead_reckon_estimate_works() {
+        // Start from 0,0,..,0
+        let mut orientation = Quaternion::default();
+        let mut velocity = F32x3::default();
+        let mut displacement = F32x3::default();
+        let mut accel = F32x3::default();
+
+        // Detects free fall
+        (velocity, displacement) =
+            dead_reckon_estimate(velocity, displacement, orientation, accel, 1.);
+        check_f32x3_near(F32x3::from((0., 0., G_TO_MPS2 * -1.)), velocity);
+        check_f32x3_near(F32x3::from((0., 0., G_TO_MPS2 * -0.5)), displacement);
+
+        // Detects recovery
+        accel = F32x3::from((0., 0., G_TO_MPS2 * 2.));
+        (velocity, displacement) =
+            dead_reckon_estimate(velocity, displacement, orientation, accel, 1.);
+        check_f32x3_near(F32x3::default(), velocity);
+        check_f32x3_near(F32x3::from((0., 0., G_TO_MPS2 * -1.)), displacement);
+
+        // Rotate to face the left, maintain altitude, accelerate forward for half of second
+        orientation = Quaternion::axis_angle((0., 0., 1.).into(), PI / 2.);
+        accel = F32x3::from((2., 0., G_TO_MPS2));
+        (velocity, displacement) =
+            dead_reckon_estimate(velocity, displacement, orientation, accel, 0.5);
+        check_f32x3_near(F32x3::from((0., 1., 0.)), velocity);
+        check_f32x3_near(F32x3::from((0., 0.25, G_TO_MPS2 * -1.)), displacement);
     }
 }
