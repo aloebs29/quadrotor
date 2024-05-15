@@ -17,6 +17,7 @@ const REG_ADDRESS_CTRL_REG1: u8 = 0x13;
 
 const WHOAMI_EXPECTED: u8 = 0xD7;
 const SCALE: f32 = 0.03125;
+const DEGREES_TO_RADIANS: f32 = 0.01745329;
 
 #[bitfield(u8)]
 struct RegStatus {
@@ -134,7 +135,7 @@ impl Fxas21002 {
     }
 
     fn scale(raw: i16) -> f32 {
-        f32::from(raw) * SCALE
+        f32::from(raw) * SCALE * DEGREES_TO_RADIANS
     }
 }
 

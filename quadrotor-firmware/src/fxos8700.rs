@@ -19,6 +19,7 @@ const REG_ADDRESS_M_CTRL_REG2: u8 = 0x5C;
 
 const WHOAMI_EXPECTED: u8 = 0xC7;
 const ACCEL_SCALE: f32 = 0.488;
+const MILLIG_TO_MPS2: f32 = 0.00980665;
 const MAG_SCALE: f32 = 0.1;
 
 #[bitfield(u8)]
@@ -194,7 +195,7 @@ impl Fxos8700 {
     }
 
     fn scale_accel(raw: i16) -> f32 {
-        f32::from(raw) * ACCEL_SCALE
+        f32::from(raw) * ACCEL_SCALE * MILLIG_TO_MPS2
     }
 
     fn scale_mag(raw: i16) -> f32 {

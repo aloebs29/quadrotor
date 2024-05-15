@@ -73,12 +73,14 @@ class Quaternion:
 
 class Telemetry:
     def __init__(self, packed_bytes):
-        t = struct.unpack("<QIfffffffffffffff", packed_bytes)
-        self.timestamp = t[0] # millis
+        # TODO: Better serialization (good luck counting f's in that format string..)
+        t = struct.unpack("<fIffffffffffffffffff", packed_bytes)
+        self.timestamp = t[0] # sec
         self.error_count = t[1]
         self.battery_voltage = t[2] # V
-        self.accel = Vec3(t[3], t[4], t[5]) # mg
-        self.gyro  = Vec3(t[6], t[7], t[8]) # dps
+        self.accel = Vec3(t[3], t[4], t[5]) # m/s^2
+        self.gyro  = Vec3(t[6], t[7], t[8]) # rad/s
         self.mag   = Vec3(t[9], t[10], t[11]) # uT
         self.pressure = t[12] # Pa
         self.orientation = Quaternion(t[13], t[14], t[15], t[16])
+        self.velocity = Vec3(t[17], t[18], t[19])

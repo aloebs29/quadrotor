@@ -48,7 +48,7 @@ impl From<Quaternion> for FlatQuaternion {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Pod, Zeroable)]
 pub struct Telemetry {
     // Metadata
-    pub timestamp: u64,
+    pub timestamp: f32,
     pub error_count: u32,
 
     // Sensor readings
@@ -58,8 +58,8 @@ pub struct Telemetry {
     pub mag: FlatVec3F32,
     pub pressure: f32,
 
-    // TODO: Orientation/position
     pub orientation: FlatQuaternion,
+    pub velocity: FlatVec3F32,
 }
 
 pub type TelemetrySignal = Signal<NoopRawMutex, Telemetry>;

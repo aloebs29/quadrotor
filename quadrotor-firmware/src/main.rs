@@ -34,7 +34,6 @@ const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
 const VBAT_DIVIDER: f32 = 568.75;
 
-const DEGREES_TO_RADIANS: f32 = 0.01745329;
 const MS_TO_SEC: f32 = 0.001;
 
 bind_interrupts!(struct I2cIrqs {
@@ -106,6 +105,7 @@ async fn main(spawner: Spawner) {
     let mut led = Output::new(p.P1_10, Level::Low, OutputDrive::Standard);
 
     let mut next_iter_start = Instant::now();
+    let mut timestamp = next_iter_start.as_millis() as f32 * MS_TO_SEC;
     let mut error_count = 0u32;
 
     let mut accel_msmt = F32x3::default();
@@ -114,6 +114,7 @@ async fn main(spawner: Spawner) {
     let mut adc_msmt_buf = [0i16; 1];
 
     let mut orientation = Quaternion::default();
+    let mut velocity = F32x3::default();
 
     // NOTE: We don't want to start running the control loop with some default pressure measurement, because then our
     // intial altitude will be way off. Wait until the pressure sensor returns a valid reading.
@@ -136,7 +137,9 @@ async fn main(spawner: Spawner) {
         // Perform measurements
         led.set_high();
 
-        let timestamp = embassy_time::Instant::now().as_millis();
+        let new_timestamp = embassy_time::Instant::now().as_millis() as f32 * MS_TO_SEC;
+        let delta_t = new_timestamp - timestamp;
+        timestamp = new_timestamp;
 
         // NOTE: I2C transactions need to happen in a serial fashion, since they all use the same I2C bus. However, the
         //       ADC read can happen in parallel with one of those I2C transactions.
@@ -163,13 +166,9 @@ async fn main(spawner: Spawner) {
         // ==============
 
         // Compute orientation
-        orientation = sensor_fusion::madgwick_fusion_9(
-            orientation,
-            accel_msmt,
-            gyro_msmt * DEGREES_TO_RADIANS,
-            mag_msmt,
-            MAIN_LOOP_INTERVAL_MS as f32 * MS_TO_SEC,
-        );
+        orientation =
+            sensor_fusion::madgwick_fusion_9(orientation, accel_msmt, gyro_msmt, mag_msmt, delta_t);
+        velocity = sensor_fusion::estimate_velocity(velocity, orientation, accel_msmt, delta_t);
         telemetry_signal.signal(Telemetry {
             timestamp,
             error_count,
@@ -179,6 +178,7 @@ async fn main(spawner: Spawner) {
             mag: mag_msmt.into(),
             pressure: pressure_msmt,
             orientation: orientation.into(),
+            velocity: velocity.into(),
         });
     }
 }

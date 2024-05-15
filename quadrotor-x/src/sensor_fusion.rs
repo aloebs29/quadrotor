@@ -165,13 +165,12 @@ pub fn madgwick_fusion_9(
     }
 }
 
-pub fn dead_reckon_estimate(
+pub fn estimate_velocity(
     last_velocity: F32x3,
-    last_displacement: F32x3,
     orientation: Quaternion,
     accel: F32x3,
     delta_t: f32,
-) -> (F32x3, F32x3) {
+) -> F32x3 {
     // Rotate acceleration vector by our orientation
     let accel = orientation.rotate(accel);
 
@@ -179,11 +178,7 @@ pub fn dead_reckon_estimate(
     let accel = accel - orientation.rotate(F32x3::from((0., 0., G_TO_MPS2)));
 
     // Integrate accelerometer measurement
-    let new_velocity = last_velocity + accel * delta_t;
-    let avg_velocity = (last_velocity + new_velocity) * 0.5;
-    let new_displacement = last_displacement + avg_velocity * delta_t;
-
-    (new_velocity, new_displacement)
+    last_velocity + accel * delta_t
 }
 
 #[cfg(test)]
@@ -442,32 +437,25 @@ mod tests {
     }
 
     #[test]
-    fn dead_reckon_estimate_works() {
+    fn estimate_velocity_works() {
         // Start from 0,0,..,0
         let mut orientation = Quaternion::default();
         let mut velocity = F32x3::default();
-        let mut displacement = F32x3::default();
         let mut accel = F32x3::default();
 
         // Detects free fall
-        (velocity, displacement) =
-            dead_reckon_estimate(velocity, displacement, orientation, accel, 1.);
+        velocity = estimate_velocity(velocity, orientation, accel, 1.);
         check_f32x3_near(F32x3::from((0., 0., G_TO_MPS2 * -1.)), velocity);
-        check_f32x3_near(F32x3::from((0., 0., G_TO_MPS2 * -0.5)), displacement);
 
         // Detects recovery
         accel = F32x3::from((0., 0., G_TO_MPS2 * 2.));
-        (velocity, displacement) =
-            dead_reckon_estimate(velocity, displacement, orientation, accel, 1.);
+        velocity = estimate_velocity(velocity, orientation, accel, 1.);
         check_f32x3_near(F32x3::default(), velocity);
-        check_f32x3_near(F32x3::from((0., 0., G_TO_MPS2 * -1.)), displacement);
 
         // Rotate to face the left, maintain altitude, accelerate forward for half of second
         orientation = Quaternion::axis_angle((0., 0., 1.).into(), PI / 2.);
         accel = F32x3::from((2., 0., G_TO_MPS2));
-        (velocity, displacement) =
-            dead_reckon_estimate(velocity, displacement, orientation, accel, 0.5);
+        velocity = estimate_velocity(velocity, orientation, accel, 0.5);
         check_f32x3_near(F32x3::from((0., 1., 0.)), velocity);
-        check_f32x3_near(F32x3::from((0., 0.25, G_TO_MPS2 * -1.)), displacement);
     }
 }

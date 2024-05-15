@@ -71,36 +71,42 @@ def run_ui(stop_event, telemetry_queue, use_host_orientation):
             rot_visualizer = RotationVisualizer()
 
         # Plots
-        orientation_plot = TimeSeriesPlot("Orientation", "Vector Magnitude (norm)", -1, 1)
+        orientation_plot = TimeSeriesPlot("Orientation Estimate", "Vector Magnitude (norm)", (-1, 1))
         orientation_w_series = orientation_plot.add_series("W")
         orientation_x_series = orientation_plot.add_series("X")
         orientation_y_series = orientation_plot.add_series("Y")
         orientation_z_series = orientation_plot.add_series("Z")
 
-        accel_plot = TimeSeriesPlot("Accelerometer Data", "Acceleration (g)", -4, 4)
+        velocity_plot = TimeSeriesPlot("Velocity Estimate", "Velocity (m/s)")
+        velocity_x_series = velocity_plot.add_series("X")
+        velocity_y_series = velocity_plot.add_series("Y")
+        velocity_z_series = velocity_plot.add_series("Z")
+
+        accel_plot = TimeSeriesPlot("Accelerometer Data", "Acceleration (m/s^2)", (-40, 40))
         accel_x_series = accel_plot.add_series("X")
         accel_y_series = accel_plot.add_series("Y")
         accel_z_series = accel_plot.add_series("Z")
 
-        gyro_plot = TimeSeriesPlot("Gyroscope Data", "Angular velocity (dps)", -1000, 1000)
+        gyro_plot = TimeSeriesPlot("Gyroscope Data", "Angular velocity (rad/s)", (-20, 20))
         gyro_x_series = gyro_plot.add_series("X")
         gyro_y_series = gyro_plot.add_series("Y")
         gyro_z_series = gyro_plot.add_series("Z")
 
-        mag_plot = TimeSeriesPlot("Magnetometer Data", "Magnetic field strength (uT)", -100, 100)
+        mag_plot = TimeSeriesPlot("Magnetometer Data", "Magnetic field strength (uT)", (-100, 100))
         mag_x_series = mag_plot.add_series("X")
         mag_y_series = mag_plot.add_series("Y")
         mag_z_series = mag_plot.add_series("Z")
 
-        pressure_plot = TimeSeriesPlot("Pressure Sensor Data", "Pressure (kPa)", 100, 105)
+        pressure_plot = TimeSeriesPlot("Pressure Sensor Data", "Pressure (kPa)")
         pressure_series = pressure_plot.add_series(None)
 
         # Arrange items in a grid
         grid = dpg_grid.Grid(2, 4, window)
 
         grid.push(status_window, 0, 0)
-        grid.push(rot_window, (0, 1), (0, 2))
-        grid.push(orientation_plot.plot, 0, 3)
+        grid.push(rot_window, 0, 1)
+        grid.push(orientation_plot.plot, 0, 2)
+        grid.push(velocity_plot.plot, 0, 3)
 
         grid.push(accel_plot.plot, 1, 0)
         grid.push(gyro_plot.plot, 1, 1)
@@ -129,7 +135,7 @@ def run_ui(stop_event, telemetry_queue, use_host_orientation):
             t = telemetry_queue.get()
 
             # Establish time axis offset if not already established
-            new_timestamp = t.timestamp / 1000 # millis -> seconds
+            new_timestamp = t.timestamp
             if timestamp_offset is None:
                 timestamp_offset = new_timestamp - time.time()
 
@@ -164,9 +170,13 @@ def run_ui(stop_event, telemetry_queue, use_host_orientation):
             orientation_z_series.append_data(new_timestamp, q.z)
 
             # Update other plots
-            accel_x_series.append_data(new_timestamp, t.accel.x / 1000) # mg -> g
-            accel_y_series.append_data(new_timestamp, t.accel.y / 1000) # mg -> g
-            accel_z_series.append_data(new_timestamp, t.accel.z / 1000) # mg -> g
+            velocity_x_series.append_data(new_timestamp, t.velocity.x)
+            velocity_y_series.append_data(new_timestamp, t.velocity.y)
+            velocity_z_series.append_data(new_timestamp, t.velocity.z)
+
+            accel_x_series.append_data(new_timestamp, t.accel.x)
+            accel_y_series.append_data(new_timestamp, t.accel.y)
+            accel_z_series.append_data(new_timestamp, t.accel.z)
 
             gyro_x_series.append_data(new_timestamp, t.gyro.x)
             gyro_y_series.append_data(new_timestamp, t.gyro.y)
@@ -176,7 +186,7 @@ def run_ui(stop_event, telemetry_queue, use_host_orientation):
             mag_y_series.append_data(new_timestamp, t.mag.y)
             mag_z_series.append_data(new_timestamp, t.mag.z)
 
-            pressure_series.append_data(new_timestamp, t.pressure / 1000) # Pa -> kPa
+            pressure_series.append_data(new_timestamp, t.pressure)
 
             # Update last timestamp (for host side orientation calcs)
             last_timestamp = new_timestamp
@@ -186,6 +196,7 @@ def run_ui(stop_event, telemetry_queue, use_host_orientation):
             xaxis_end = time.time() + timestamp_offset
 
             orientation_plot.update(xaxis_end)
+            velocity_plot.update(xaxis_end)
 
             accel_plot.update(xaxis_end)
             gyro_plot.update(xaxis_end)
