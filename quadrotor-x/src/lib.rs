@@ -7,8 +7,6 @@ mod lib {
     pub use std::panic;
 }
 
+pub mod datatypes;
 pub mod sensor_fusion;
 pub mod utils;
-
-#[cfg(feature = "defmt")]
-pub mod fmt;

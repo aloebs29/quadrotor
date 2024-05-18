@@ -23,5 +23,6 @@ panic-probe = { version = "0.3", features = ["print-defmt"] }
 static_cell = { version = "2" }
 heapless = "0.8.0"
 bitfield-struct = "0.6"
-micromath = { version = "2.1.0", features = ["quaternion", "vector"] }
 bytemuck = { version = "1.12", features = [ "derive" ] }
+postcard = { version = "1.0.8", features = [ "experimental-derive", "use-defmt" ] }
+serde = { version = "1.0.*", default-features = false }

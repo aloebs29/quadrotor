@@ -51,11 +51,11 @@ if __name__ == "__main__":
         output = Quaternion(*output)
         
         print((f"madgwick_fusion_6_matches_expected(\n"
-               f"   Quaternion::new({input.qlast.w}, {input.qlast.x}, {input.qlast.y}, {input.qlast.z}),\n"
-               f"   F32x3::from(({input.accel.x}, {input.accel.y}, {input.accel.z})),\n"
-               f"   F32x3::from(({input.gyro.x}, {input.gyro.y}, {input.gyro.z})),\n"
+               f"   Quatf::new({input.qlast.w}, {input.qlast.x}, {input.qlast.y}, {input.qlast.z}),\n"
+               f"   Vec3f::new({input.accel.x}, {input.accel.y}, {input.accel.z}),\n"
+               f"   Vec3f::new({input.gyro.x}, {input.gyro.y}, {input.gyro.z}),\n"
                f"   {input.delta_t},\n"
-               f"   Quaternion::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
+               f"   Quatf::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
                f");\n"))
 
     # Madgwick fusion 9 test values
@@ -73,10 +73,10 @@ if __name__ == "__main__":
         output = Quaternion(*output)
         
         print((f"madgwick_fusion_9_matches_expected(\n"
-               f"   Quaternion::new({input.qlast.w}, {input.qlast.x}, {input.qlast.y}, {input.qlast.z}),\n"
-               f"   F32x3::from(({input.accel.x}, {input.accel.y}, {input.accel.z})),\n"
-               f"   F32x3::from(({input.gyro.x}, {input.gyro.y}, {input.gyro.z})),\n"
-               f"   F32x3::from(({input.mag.x}, {input.mag.y}, {input.mag.z})),\n"
+               f"   Quatf::new({input.qlast.w}, {input.qlast.x}, {input.qlast.y}, {input.qlast.z}),\n"
+               f"   Vec3f::new({input.accel.x}, {input.accel.y}, {input.accel.z}),\n"
+               f"   Vec3f::new({input.gyro.x}, {input.gyro.y}, {input.gyro.z}),\n"
+               f"   Vec3f::new({input.mag.x}, {input.mag.y}, {input.mag.z}),\n"
                f"   {input.delta_t},\n"
-               f"   Quaternion::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
+               f"   Quatf::new({output.w}, {output.x}, {output.y}, {output.z}),\n"
                f");\n"))

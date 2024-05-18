@@ -1,6 +1,9 @@
 use core::mem;
 
 use embassy_futures::select::{select, Either};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::signal::Signal;
+
 use nrf_softdevice::ble::advertisement_builder::{
     Flag, LegacyAdvertisementBuilder, LegacyAdvertisementPayload, ServiceList, ServiceUuid16,
 };
@@ -8,8 +11,9 @@ use nrf_softdevice::raw::{self, ble_gap_conn_params_t};
 use nrf_softdevice::{ble, Softdevice};
 
 use defmt::*;
+use postcard::experimental::max_size::MaxSize;
 
-use crate::datatypes::{Telemetry, TelemetrySignal};
+use quadrotor_x::datatypes::Telemetry;
 use quadrotor_x::utils::lipo_1s_charge_percent_from_voltage;
 
 const BT_DEVICE_NAME: &str = "Quadcopter";
@@ -24,7 +28,7 @@ struct BatteryService {
 #[nrf_softdevice::gatt_service(uuid = "6dff68a3-f84a-4f54-a244-cc0b528425ea")]
 struct TelemetryService {
     #[characteristic(uuid = "6dff68a3-f84a-4f54-a244-cc0b528425ea", read, notify)]
-    telemetry: [u8; mem::size_of::<Telemetry>()],
+    telemetry: [u8; Telemetry::POSTCARD_MAX_SIZE],
 }
 
 #[nrf_softdevice::gatt_server]
@@ -35,13 +39,13 @@ struct ServerInternal {
 
 pub struct Server<'a> {
     internal: ServerInternal,
-    telemetry_signal: &'a TelemetrySignal,
+    telemetry_signal: &'a Signal<NoopRawMutex, Telemetry>,
 }
 
 impl Server<'_> {
     pub fn new<'a>(
         sd: &mut Softdevice,
-        telemetry_signal: &'static TelemetrySignal,
+        telemetry_signal: &'static Signal<NoopRawMutex, Telemetry>,
     ) -> Result<Self, nrf_softdevice::ble::gatt_server::RegisterError> {
         let internal = ServerInternal::new(sd)?;
 
@@ -69,19 +73,19 @@ impl Server<'_> {
 
                 // Notify telemetry service
                 // NOTE: Unwrap here as any runtime error just represents a programming error.
-                let telemetry_byte_array: &[u8; mem::size_of::<Telemetry>()] =
-                    unwrap!(bytemuck::bytes_of(&telemetry).try_into());
+                let mut telemetry_byte_array = [0u8; Telemetry::POSTCARD_MAX_SIZE];
+                unwrap!(postcard::to_slice(&telemetry, &mut telemetry_byte_array));
                 match self
                     .internal
                     .telemetry_service
-                    .telemetry_notify(connection, telemetry_byte_array)
+                    .telemetry_notify(connection, &telemetry_byte_array)
                 {
                     Ok(_) => (),
                     Err(_) => {
                         let _ = self
                             .internal
                             .telemetry_service
-                            .telemetry_set(telemetry_byte_array);
+                            .telemetry_set(&telemetry_byte_array);
                     }
                 };
             }

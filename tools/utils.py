@@ -71,16 +71,48 @@ class Quaternion:
         return np.array([self.w, self.x, self.y, self.z])
 
 
+class _PostcardDeserializer:
+    # https://postcard.jamesmunns.com/wire-format.html
+
+    def __init__(self, bytes_):
+        self.bytes_ = bytes_
+
+    def pop_f32(self):
+        val = struct.unpack("<f", self.bytes_[:4])[0]
+        self.bytes_ = self.bytes_[4:]
+        return val
+
+    def pop_u32(self):
+        val = 0
+        while True:
+            current = self.bytes_.pop(0)
+            val = val << 7 | current & 0x7F
+            if not (current & 0x80):
+                break
+        return val
+    
+    def pop_vec3(self):
+        return Vec3(self.pop_f32(), self.pop_f32(), self.pop_f32())
+    
+    def pop_quat(self):
+        return Quaternion(self.pop_f32(), self.pop_f32(), self.pop_f32(), self.pop_f32())
+
+
 class Telemetry:
     def __init__(self, packed_bytes):
-        # TODO: Better serialization (good luck counting f's in that format string..)
-        t = struct.unpack("<fIffffffffffffffffff", packed_bytes)
-        self.timestamp = t[0] # sec
-        self.error_count = t[1]
-        self.battery_voltage = t[2] # V
-        self.accel = Vec3(t[3], t[4], t[5]) # m/s^2
-        self.gyro  = Vec3(t[6], t[7], t[8]) # rad/s
-        self.mag   = Vec3(t[9], t[10], t[11]) # uT
-        self.pressure = t[12] # Pa
-        self.orientation = Quaternion(t[13], t[14], t[15], t[16])
-        self.velocity = Vec3(t[17], t[18], t[19])
+        # TODO: Figure out a [concise] way to not duplicate these serialized structs in Rust/Python..
+        #
+        # Using a lib for common/serializable types that gets compiled for firmware as well as for Python bindings (PyO3)
+        # seems like a good idea at first.. but PyO3 does not generate struct field accessors, so these types would end
+        # up needing PyO3 methods for accessing each field (or a __getattr__ implementation that matches them all).
+
+        deser = _PostcardDeserializer(packed_bytes)
+        self.timestamp = deser.pop_f32() # seconds
+        self.error_count = deser.pop_u32()
+        self.battery_voltage = deser.pop_f32() # V
+        self.accel = deser.pop_vec3() # m/s^2
+        self.gyro  = deser.pop_vec3() # rad/s
+        self.mag   = deser.pop_vec3() # uT
+        self.pressure = deser.pop_f32() # Pa
+        self.orientation = deser.pop_quat()
+        self.velocity = deser.pop_vec3() # m/s

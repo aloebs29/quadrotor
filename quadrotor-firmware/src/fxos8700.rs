@@ -4,7 +4,8 @@ use bitfield_struct::bitfield;
 use bytemuck::{Pod, Zeroable};
 use defmt::{debug, error};
 use embassy_nrf::twim::{Instance, Twim};
-use micromath::vector::F32x3;
+
+use quadrotor_x::datatypes::Vec3f;
 
 use crate::xerror::*;
 
@@ -155,8 +156,8 @@ impl Fxos8700 {
     pub async fn read<'a, T: Instance>(
         &mut self,
         twim: &mut Twim<'a, T>,
-        accel_out: &mut F32x3,
-        mag_out: &mut F32x3,
+        accel_out: &mut Vec3f,
+        mag_out: &mut Vec3f,
     ) -> XResult<()> {
         let mut read_buffer = DataReadBuffer::zeroed();
         twim.write_read(

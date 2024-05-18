@@ -5,6 +5,8 @@ use core::mem;
 
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
@@ -17,17 +19,15 @@ use embassy_nrf::{bind_interrupts, interrupt, peripherals};
 use nrf_softdevice::{SocEvent, Softdevice};
 
 use defmt::{info, unwrap};
-use micromath::vector::F32x3;
-use micromath::Quaternion;
 use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
-use quadrotor_firmware::datatypes::{Telemetry, TelemetrySignal};
 use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::usb_serial;
 
+use quadrotor_x::datatypes::{Quatf, Telemetry, Vec3f};
 use quadrotor_x::sensor_fusion;
 
 const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
@@ -69,8 +69,8 @@ async fn main(spawner: Spawner) {
     let sd = Softdevice::enable(&ble_server::get_softdevice_config());
 
     // Setup shared data between tasks
-    static TELEMETRY_SIGNAL: StaticCell<TelemetrySignal> = StaticCell::new();
-    let telemetry_signal = TELEMETRY_SIGNAL.init(TelemetrySignal::new());
+    static TELEMETRY_SIGNAL: StaticCell<Signal<NoopRawMutex, Telemetry>> = StaticCell::new();
+    let telemetry_signal = TELEMETRY_SIGNAL.init(Signal::new());
 
     // Initialize USB
     let (usb_driver, cdc_class) = usb_serial::init(p.USBD, vbus_detect);
@@ -108,13 +108,13 @@ async fn main(spawner: Spawner) {
     let mut timestamp = next_iter_start.as_millis() as f32 * MS_TO_SEC;
     let mut error_count = 0u32;
 
-    let mut accel_msmt = F32x3::default();
-    let mut mag_msmt = F32x3::default();
-    let mut gyro_msmt = F32x3::default();
+    let mut accel_msmt = Vec3f::zeroed();
+    let mut mag_msmt = Vec3f::zeroed();
+    let mut gyro_msmt = Vec3f::zeroed();
     let mut adc_msmt_buf = [0i16; 1];
 
-    let mut orientation = Quaternion::default();
-    let mut velocity = F32x3::default();
+    let mut orientation = Quatf::default();
+    let mut velocity = Vec3f::zeroed();
 
     // NOTE: We don't want to start running the control loop with some default pressure measurement, because then our
     // intial altitude will be way off. Wait until the pressure sensor returns a valid reading.
