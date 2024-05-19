@@ -5,8 +5,6 @@ use core::mem;
 
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
@@ -22,6 +20,7 @@ use defmt::{info, unwrap};
 use static_cell::StaticCell;
 
 use quadrotor_firmware::ble_server;
+use quadrotor_firmware::datatypes::{CommandChannel, CommandSender, TelemetrySignal};
 use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
@@ -69,13 +68,23 @@ async fn main(spawner: Spawner) {
     let sd = Softdevice::enable(&ble_server::get_softdevice_config());
 
     // Setup shared data between tasks
-    static TELEMETRY_SIGNAL: StaticCell<Signal<NoopRawMutex, Telemetry>> = StaticCell::new();
-    let telemetry_signal = TELEMETRY_SIGNAL.init(Signal::new());
+    static TELEMETRY_SIGNAL: StaticCell<TelemetrySignal> = StaticCell::new();
+    let telemetry_signal = TELEMETRY_SIGNAL.init(TelemetrySignal::new());
+    static COMMAND_CHANNEL: StaticCell<CommandChannel> = StaticCell::new();
+    let command_channel = COMMAND_CHANNEL.init(CommandChannel::new());
+    static COMMAND_SENDER: StaticCell<CommandSender> = StaticCell::new();
+    let command_sender = COMMAND_SENDER.init(command_channel.sender());
+    let command_receiver = command_channel.receiver();
 
     // Initialize USB
     let (usb_driver, cdc_class) = usb_serial::init(p.USBD, vbus_detect);
+
     // Initialize BLE peripheral server
-    let server = unwrap!(ble_server::Server::new(sd, telemetry_signal));
+    let server = unwrap!(ble_server::Server::new(
+        sd,
+        telemetry_signal,
+        command_sender
+    ));
 
     // Initialize ADC
     let adc_config = saadc::Config::default();
@@ -132,6 +141,12 @@ async fn main(spawner: Spawner) {
     loop {
         next_iter_start += Duration::from_millis(MAIN_LOOP_INTERVAL_MS);
         Timer::at(next_iter_start).await;
+
+        // ==============
+        // Handle commands
+        while let Ok(_command) = command_receiver.try_receive() {
+            info!("Received command");
+        }
 
         // ==============
         // Perform measurements

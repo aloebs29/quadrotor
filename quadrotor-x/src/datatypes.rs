@@ -88,3 +88,8 @@ pub struct Telemetry {
     pub orientation: Quatf,
     pub velocity: Vec3f,
 }
+
+#[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]
+pub enum Command {
+    CalibrateAccel(f32),
+}

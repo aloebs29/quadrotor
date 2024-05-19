@@ -1,8 +1,6 @@
 use core::mem;
 
 use embassy_futures::select::{select, Either};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::signal::Signal;
 
 use nrf_softdevice::ble::advertisement_builder::{
     Flag, LegacyAdvertisementBuilder, LegacyAdvertisementPayload, ServiceList, ServiceUuid16,
@@ -13,8 +11,10 @@ use nrf_softdevice::{ble, Softdevice};
 use defmt::*;
 use postcard::experimental::max_size::MaxSize;
 
-use quadrotor_x::datatypes::Telemetry;
+use quadrotor_x::datatypes::{Command, Telemetry};
 use quadrotor_x::utils::lipo_1s_charge_percent_from_voltage;
+
+use crate::datatypes::{CommandSender, TelemetrySignal};
 
 const BT_DEVICE_NAME: &str = "Quadcopter";
 static mut BT_ADDRESS: Option<ble::Address> = None;
@@ -31,31 +31,41 @@ struct TelemetryService {
     telemetry: [u8; Telemetry::POSTCARD_MAX_SIZE],
 }
 
+#[nrf_softdevice::gatt_service(uuid = "51e426ca-502f-405b-89dc-1b299df7cf32")]
+struct CommandService {
+    #[characteristic(uuid = "51e426ca-502f-405b-89dc-1b299df7cf32", write)]
+    command: [u8; Command::POSTCARD_MAX_SIZE],
+}
+
 #[nrf_softdevice::gatt_server]
 struct ServerInternal {
     battery_service: BatteryService,
     telemetry_service: TelemetryService,
+    command_service: CommandService,
 }
 
 pub struct Server<'a> {
     internal: ServerInternal,
-    telemetry_signal: &'a Signal<NoopRawMutex, Telemetry>,
+    telemetry_signal: &'a TelemetrySignal,
+    command_sender: &'a CommandSender<'a>,
 }
 
 impl Server<'_> {
     pub fn new<'a>(
         sd: &mut Softdevice,
-        telemetry_signal: &'static Signal<NoopRawMutex, Telemetry>,
-    ) -> Result<Self, nrf_softdevice::ble::gatt_server::RegisterError> {
+        telemetry_signal: &'static TelemetrySignal,
+        command_sender: &'static CommandSender<'static>,
+    ) -> Result<Self, ble::gatt_server::RegisterError> {
         let internal = ServerInternal::new(sd)?;
 
         Ok(Self {
             internal,
             telemetry_signal,
+            command_sender,
         })
     }
 
-    async fn update_input_values<'a>(&self, connection: &'a ble::Connection) {
+    async fn update_input_values(&self, connection: &ble::Connection) {
         // NOTE: Notifying the BLE client on every telemetry update (currently 100 Hz) seems to
         const UPDATES_PER_NOTIFY: u32 = 5;
         let mut iter_count = 0u32;
@@ -141,12 +151,8 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
     static ADV_DATA: LegacyAdvertisementPayload = LegacyAdvertisementBuilder::new()
         .flags(&[Flag::GeneralDiscovery, Flag::LE_Only])
         .services_16(ServiceList::Complete, &[ServiceUuid16::BATTERY])
-        .services_128(
-            ServiceList::Complete,
-            &[0x6dff68a3_f84a_4f54_a244_cc0b528425ea_u128.to_le_bytes()],
-        )
+        .full_name(BT_DEVICE_NAME)
         .build();
-
     static SCAN_DATA: LegacyAdvertisementPayload = LegacyAdvertisementBuilder::new().build();
 
     loop {
@@ -182,6 +188,17 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
             ServerInternalEvent::TelemetryService(e) => match e {
                 TelemetryServiceEvent::TelemetryCccdWrite { notifications } => {
                     debug!("telemetry notifications: {}", notifications)
+                }
+            },
+            ServerInternalEvent::CommandService(e) => match e {
+                CommandServiceEvent::CommandWrite(command_bytes) => {
+                    if let Ok(command) = postcard::from_bytes::<Command>(&command_bytes) {
+                        if let Err(_) = server.command_sender.try_send(command) {
+                            error!("Failed to push command onto queue.");
+                        }
+                    } else {
+                        error!("Failed to parse command from bytes.");
+                    }
                 }
             },
         });
