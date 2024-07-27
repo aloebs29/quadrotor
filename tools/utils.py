@@ -149,7 +149,6 @@ class Telemetry:
         self.mag = deser.pop_vec3()  # uT
         self.pressure = deser.pop_f32()  # Pa
         self.orientation = deser.pop_quat()
-        self.velocity = deser.pop_vec3()  # m/s
 
 
 class Command:

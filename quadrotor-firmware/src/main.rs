@@ -26,7 +26,8 @@ use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::usb_serial;
 
-use quadrotor_x::datatypes::{Quatf, Telemetry, Vec3f};
+use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
+use quadrotor_x::datatypes::{Command, Quatf, Telemetry, Vec3f};
 use quadrotor_x::sensor_fusion;
 
 const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
@@ -123,7 +124,6 @@ async fn main(spawner: Spawner) {
     let mut adc_msmt_buf = [0i16; 1];
 
     let mut orientation = Quatf::default();
-    let mut velocity = Vec3f::zeroed();
 
     // NOTE: We don't want to start running the control loop with some default pressure measurement, because then our
     // intial altitude will be way off. Wait until the pressure sensor returns a valid reading.
@@ -138,14 +138,23 @@ async fn main(spawner: Spawner) {
         }
     };
 
+    let mut accel_offset_state: Option<AccelOffsetState> = None;
+
     loop {
         next_iter_start += Duration::from_millis(MAIN_LOOP_INTERVAL_MS);
         Timer::at(next_iter_start).await;
 
         // ==============
         // Handle commands
-        while let Ok(_command) = command_receiver.try_receive() {
-            info!("Received command");
+        while let Ok(command) = command_receiver.try_receive() {
+            match command {
+                Command::CalibrateAccel(duration_sec) => {
+                    let builder = AccelOffsetsBuilder::new(
+                        (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize,
+                    );
+                    accel_offset_state = Some(AccelOffsetState::InProgress(builder));
+                }
+            }
         }
 
         // ==============
@@ -180,10 +189,22 @@ async fn main(spawner: Spawner) {
         led.set_low();
         // ==============
 
+        // Update and/or apply corrections
+        if let Some(ref inner_offset_state) = accel_offset_state {
+            match inner_offset_state {
+                AccelOffsetState::InProgress(builder) => {
+                    let new_inner_offset_state = builder.update(accel_msmt);
+                    accel_offset_state = Some(new_inner_offset_state);
+                }
+                AccelOffsetState::Ready(offsets) => {
+                    accel_msmt = offsets.apply(accel_msmt);
+                }
+            }
+        }
+
         // Compute orientation
         orientation =
             sensor_fusion::madgwick_fusion_9(orientation, accel_msmt, gyro_msmt, mag_msmt, delta_t);
-        velocity = sensor_fusion::estimate_velocity(velocity, orientation, accel_msmt, delta_t);
         telemetry_signal.signal(Telemetry {
             timestamp,
             error_count,
@@ -193,7 +214,6 @@ async fn main(spawner: Spawner) {
             mag: mag_msmt.into(),
             pressure: pressure_msmt,
             orientation: orientation.into(),
-            velocity: velocity.into(),
         });
     }
 }

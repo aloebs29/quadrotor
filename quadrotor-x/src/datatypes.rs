@@ -1,3 +1,5 @@
+use core::ops;
+
 use micromath::{vector::F32x3, Quaternion};
 use postcard::experimental::max_size::MaxSize;
 use serde::{Deserialize, Serialize};
@@ -10,12 +12,36 @@ pub struct Vec3f {
 }
 
 impl Vec3f {
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub const fn new(x: f32, y: f32, z: f32) -> Self {
         Self { x, y, z }
     }
 
-    pub fn zeroed() -> Self {
+    pub const fn zeroed() -> Self {
         Self::new(0., 0., 0.)
+    }
+}
+
+impl ops::Add for Vec3f {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
+    }
+}
+
+impl ops::Sub for Vec3f {
+    type Output = Self;
+
+    fn sub(self, rhs: Vec3f) -> Self::Output {
+        Self::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z)
+    }
+}
+
+impl ops::Div<f32> for Vec3f {
+    type Output = Self;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        Self::new(self.x / rhs, self.y / rhs, self.z / rhs)
     }
 }
 
@@ -86,7 +112,6 @@ pub struct Telemetry {
     pub pressure: f32,
 
     pub orientation: Quatf,
-    pub velocity: Vec3f,
 }
 
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]

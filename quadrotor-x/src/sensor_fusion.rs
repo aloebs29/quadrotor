@@ -10,7 +10,7 @@ use crate::datatypes::{Quatf, Vec3f};
 
 const BETA_IMU: f32 = 0.031;
 const BETA_MARG: f32 = 0.041;
-const G_TO_MPS2: f32 = 9.80665;
+pub const G_TO_MPS2: f32 = 9.80665;
 
 fn vec3_norm(v: F32x3) -> f32 {
     v.iter().map(|n| n * n).sum()

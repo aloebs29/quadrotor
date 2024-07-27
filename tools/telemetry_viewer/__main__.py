@@ -104,11 +104,6 @@ class Ui:
             self.orientation_y_series = self.orientation_plot.add_series("Y")
             self.orientation_z_series = self.orientation_plot.add_series("Z")
 
-            self.velocity_plot = TimeSeriesPlot("Velocity Estimate", "Velocity (m/s)")
-            self.velocity_x_series = self.velocity_plot.add_series("X")
-            self.velocity_y_series = self.velocity_plot.add_series("Y")
-            self.velocity_z_series = self.velocity_plot.add_series("Z")
-
             self.accel_plot = TimeSeriesPlot("Accelerometer Data", "Acceleration (m/s^2)", (-40, 40))
             self.accel_x_series = self.accel_plot.add_series("X")
             self.accel_y_series = self.accel_plot.add_series("Y")
@@ -131,9 +126,8 @@ class Ui:
             grid = dpg_grid.Grid(2, 4, window)
 
             grid.push(status_window, 0, 0)
-            grid.push(self.rot_window, 0, 1)
-            grid.push(self.orientation_plot.plot, 0, 2)
-            grid.push(self.velocity_plot.plot, 0, 3)
+            grid.push(self.rot_window, (0, 1), (0, 2))
+            grid.push(self.orientation_plot.plot, 0, 3)
 
             grid.push(self.accel_plot.plot, 1, 0)
             grid.push(self.gyro_plot.plot, 1, 1)
@@ -205,10 +199,6 @@ class Ui:
                 self.orientation_z_series.append_data(new_timestamp, q.z)
 
                 # Update other plots
-                self.velocity_x_series.append_data(new_timestamp, t.velocity.x)
-                self.velocity_y_series.append_data(new_timestamp, t.velocity.y)
-                self.velocity_z_series.append_data(new_timestamp, t.velocity.z)
-
                 self.accel_x_series.append_data(new_timestamp, t.accel.x)
                 self.accel_y_series.append_data(new_timestamp, t.accel.y)
                 self.accel_z_series.append_data(new_timestamp, t.accel.z)
@@ -231,7 +221,6 @@ class Ui:
                 xaxis_end = time.time() + timestamp_offset
 
                 self.orientation_plot.update(xaxis_end)
-                self.velocity_plot.update(xaxis_end)
 
                 self.accel_plot.update(xaxis_end)
                 self.gyro_plot.update(xaxis_end)

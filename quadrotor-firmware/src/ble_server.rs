@@ -66,7 +66,8 @@ impl Server<'_> {
     }
 
     async fn update_input_values(&self, connection: &ble::Connection) {
-        // NOTE: Notifying the BLE client on every telemetry update (currently 100 Hz) seems to
+        // NOTE: Notifying the BLE client on every telemetry update (currently 100 Hz) seems to cause occasional latency
+        //       spikes.
         const UPDATES_PER_NOTIFY: u32 = 5;
         let mut iter_count = 0u32;
         loop {
