@@ -18,16 +18,19 @@ use nrf_softdevice::{SocEvent, Softdevice};
 
 use defmt::{info, unwrap};
 use static_cell::StaticCell;
+use ufmt::uwrite;
 
 use quadrotor_firmware::ble_server;
-use quadrotor_firmware::datatypes::{CommandChannel, CommandSender, TelemetrySignal};
+use quadrotor_firmware::datatypes::{
+    BleCommandChannel, BleCommandSender, TelemetrySignal, UsbCommand,
+};
 use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::usb_serial;
 
 use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
-use quadrotor_x::datatypes::{Command, Quatf, Telemetry, Vec3f};
+use quadrotor_x::datatypes::{BleCommand, Quatf, Telemetry, Vec3f};
 use quadrotor_x::sensor_fusion;
 
 const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
@@ -71,20 +74,20 @@ async fn main(spawner: Spawner) {
     // Setup shared data between tasks
     static TELEMETRY_SIGNAL: StaticCell<TelemetrySignal> = StaticCell::new();
     let telemetry_signal = TELEMETRY_SIGNAL.init(TelemetrySignal::new());
-    static COMMAND_CHANNEL: StaticCell<CommandChannel> = StaticCell::new();
-    let command_channel = COMMAND_CHANNEL.init(CommandChannel::new());
-    static COMMAND_SENDER: StaticCell<CommandSender> = StaticCell::new();
-    let command_sender = COMMAND_SENDER.init(command_channel.sender());
-    let command_receiver = command_channel.receiver();
+    static BLE_COMMAND_CHANNEL: StaticCell<BleCommandChannel> = StaticCell::new();
+    let ble_command_channel = BLE_COMMAND_CHANNEL.init(BleCommandChannel::new());
+    static BLE_COMMAND_SENDER: StaticCell<BleCommandSender> = StaticCell::new();
+    let ble_command_sender = BLE_COMMAND_SENDER.init(ble_command_channel.sender());
+    let ble_command_receiver = ble_command_channel.receiver();
 
     // Initialize USB
-    let (usb_driver, cdc_class) = usb_serial::init(p.USBD, vbus_detect);
+    let (usb_driver, serial_context, usb_cli) = usb_serial::init(p.USBD, vbus_detect);
 
     // Initialize BLE peripheral server
     let server = unwrap!(ble_server::Server::new(
         sd,
         telemetry_signal,
-        command_sender
+        ble_command_sender
     ));
 
     // Initialize ADC
@@ -108,7 +111,7 @@ async fn main(spawner: Spawner) {
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
     unwrap!(spawner.spawn(usb_serial::usb_task(usb_driver)));
-    unwrap!(spawner.spawn(usb_serial::serial_task(cdc_class)));
+    unwrap!(spawner.spawn(usb_serial::serial_task(serial_context)));
     unwrap!(spawner.spawn(ble_server::ble_task(sd, server)));
 
     // Set up main control loop
@@ -126,7 +129,7 @@ async fn main(spawner: Spawner) {
     let mut orientation = Quatf::default();
 
     // NOTE: We don't want to start running the control loop with some default pressure measurement, because then our
-    // intial altitude will be way off. Wait until the pressure sensor returns a valid reading.
+    // initial altitude will be way off. Wait until the pressure sensor returns a valid reading.
     let initial_pressure_timeout =
         Instant::now() + Duration::from_millis(INITIAL_PRESSURE_TIMEOUT_MS);
     let mut pressure_msmt = loop {
@@ -146,9 +149,9 @@ async fn main(spawner: Spawner) {
 
         // ==============
         // Handle commands
-        while let Ok(command) = command_receiver.try_receive() {
+        while let Ok(command) = ble_command_receiver.try_receive() {
             match command {
-                Command::CalibrateAccel(duration_sec) => {
+                BleCommand::CalibrateAccel(duration_sec) => {
                     let builder = AccelOffsetsBuilder::new(
                         (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize,
                     );
@@ -156,6 +159,22 @@ async fn main(spawner: Spawner) {
                 }
             }
         }
+        let _ = usb_cli.process_pending_commands(|cli_handle, command| match command {
+            UsbCommand::BleAddress => {
+                let address = nrf_softdevice::ble::get_address(sd).bytes();
+                let _ = uwrite!(
+                    cli_handle.writer(),
+                    "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                    address[5],
+                    address[4],
+                    address[3],
+                    address[2],
+                    address[1],
+                    address[0]
+                );
+                Ok(())
+            }
+        });
 
         // ==============
         // Perform measurements

@@ -115,6 +115,6 @@ pub struct Telemetry {
 }
 
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]
-pub enum Command {
+pub enum BleCommand {
     CalibrateAccel(f32),
 }

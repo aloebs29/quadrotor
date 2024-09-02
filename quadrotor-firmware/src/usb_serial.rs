@@ -1,23 +1,25 @@
-use core::fmt::Write as _;
-
+use embassy_futures::select::{select, Either};
 use embassy_nrf::interrupt::InterruptExt;
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
 use embassy_nrf::{bind_interrupts, interrupt, peripherals, usb};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::pipe;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use embassy_usb::{Builder, Config, UsbDevice};
 
 use defmt::{error, info};
-use heapless::{String, Vec};
+use embedded_cli::cli::{Cli, CliBuilder, CliHandle};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use crate::ble_server;
+use crate::datatypes::UsbCommand;
 
 const USB_MAX_PACKET_SIZE: u8 = 8;
 const MAX_COMMAND_LEN: usize = 128;
 const MAX_RESPONSE_LEN: usize = 128;
+const HISTORY_LEN: usize = 1024;
 
 bind_interrupts!(struct Irqs {
     USBD => usb::InterruptHandler<peripherals::USBD>;
@@ -27,68 +29,117 @@ pub type UsbDriver = Driver<'static, peripherals::USBD, &'static SoftwareVbusDet
 
 type UsbResult<T> = Result<T, EndpointError>;
 
-struct SerialContext {
-    class: CdcAcmClass<'static, UsbDriver>,
-    read_buffer: Vec<u8, MAX_COMMAND_LEN>,
-    write_buffer: String<MAX_RESPONSE_LEN>,
-}
+#[derive(Debug)]
+pub struct SerialPipeWriteError(pipe::TryWriteError);
 
-async fn write_line_to_usb(
-    class: &mut CdcAcmClass<'static, UsbDriver>,
-    data: &[u8],
-) -> UsbResult<()> {
-    for chunk in data.chunks(USB_MAX_PACKET_SIZE as usize) {
-        class.write_packet(chunk).await?;
+impl embedded_io::Error for SerialPipeWriteError {
+    fn kind(&self) -> embedded_io::ErrorKind {
+        embedded_io::ErrorKind::OutOfMemory
     }
-    class.write_packet(&[b'\n']).await?;
-    Ok(())
 }
 
-async fn command_handler(context: &mut SerialContext) -> UsbResult<()> {
-    if context.read_buffer.as_slice() == b"mac_address" {
-        if let Some(address) = ble_server::get_address() {
-            let address = address.bytes();
-            write!(
-                context.write_buffer,
-                "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-                address[5], address[4], address[3], address[2], address[1], address[0]
-            )
-            .unwrap();
-            let result =
-                write_line_to_usb(&mut context.class, context.write_buffer.as_bytes()).await;
-            context.write_buffer.clear();
-            if result.is_err() {
-                return result;
-            }
-        } else {
-            write_line_to_usb(&mut context.class, b"Unknown").await?;
+impl From<pipe::TryWriteError> for SerialPipeWriteError {
+    fn from(value: pipe::TryWriteError) -> Self {
+        Self(value)
+    }
+}
+
+pub struct SerialPipeWriter {
+    writer: pipe::Writer<'static, NoopRawMutex, MAX_RESPONSE_LEN>,
+}
+
+impl embedded_io::ErrorType for SerialPipeWriter {
+    type Error = SerialPipeWriteError;
+}
+
+impl embedded_io::Write for SerialPipeWriter {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
+        Ok(self.writer.try_write(buf)?)
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        // TODO: How to implement this without .await?
+        Ok(())
+    }
+}
+
+pub struct UsbCli {
+    reader: pipe::Reader<'static, NoopRawMutex, MAX_COMMAND_LEN>,
+    inner_cli: Cli<
+        &'static mut SerialPipeWriter,
+        SerialPipeWriteError,
+        &'static mut [u8],
+        &'static mut [u8],
+    >,
+}
+
+impl UsbCli {
+    pub fn process_pending_commands(
+        &mut self,
+        handler: impl Fn(
+            &mut CliHandle<&mut SerialPipeWriter, SerialPipeWriteError>,
+            UsbCommand,
+        ) -> Result<(), SerialPipeWriteError>,
+    ) -> Result<(), pipe::TryReadError> {
+        // Read until the pipe is empty, calling handler on each command received.
+        loop {
+            let mut received_byte = [0u8; 1];
+            let _ = self.reader.try_read(received_byte.as_mut_slice())?;
+
+            let _ = self.inner_cli.process_byte::<UsbCommand, _>(
+                received_byte[0],
+                &mut UsbCommand::processor(|cli, command| handler(cli, command)),
+            );
         }
     }
-    Ok(())
 }
 
-async fn serial_parser(context: &mut SerialContext) -> UsbResult<()> {
+pub struct SerialContext {
+    class: CdcAcmClass<'static, UsbDriver>,
+    writer_to_cli: pipe::Writer<'static, NoopRawMutex, MAX_COMMAND_LEN>,
+    reader_from_cli: pipe::Reader<'static, NoopRawMutex, MAX_RESPONSE_LEN>,
+}
+
+async fn serial_session_handler(context: &mut SerialContext) -> UsbResult<()> {
     let mut read_chunk = [0; USB_MAX_PACKET_SIZE as usize];
+    let mut write_chunk = [0; USB_MAX_PACKET_SIZE as usize];
     loop {
-        let n = context.class.read_packet(&mut read_chunk).await?;
-        for &byte in &read_chunk[..n] {
-            // If newline was received, process the command
-            if byte == b'\r' || byte == b'\n' {
-                command_handler(context).await?;
-                context.read_buffer.clear();
-            } else {
-                let _ = context.read_buffer.push(byte);
+        // Service ingress/egress simultaneously
+        let read_from_usb_future = context.class.read_packet(&mut read_chunk);
+        let read_from_cli_future = context.reader_from_cli.read(&mut write_chunk);
+
+        match select(read_from_usb_future, read_from_cli_future).await {
+            Either::First(read_from_usb_result) => {
+                let bytes_read_from_usb = read_from_usb_result?;
+                // NOTE: Cannot await here. Waiting here would pend until the CLI services more
+                //       bytes from the USB -> CLI pipe, however, the thread handling CLI commands
+                //       may be awaiting a write to the CLI -> USB pipe (which is the other future
+                //       we're selecting against here, and is blocked until we're done).
+                // TODO: Separate tasks for USB write/read?
+                if let Err(_) = context
+                    .writer_to_cli
+                    .try_write(&read_chunk[..bytes_read_from_usb])
+                {
+                    error!("Failed to write bytes from USB read buffer to CLI ingress pipe.");
+                }
+            }
+            Either::Second(bytes_read_from_cli) => {
+                context
+                    .class
+                    .write_packet(&write_chunk[..bytes_read_from_cli])
+                    .await?;
             }
         }
     }
 }
 
 pub fn init(
-    usbd: embassy_nrf::peripherals::USBD,
+    usbd: peripherals::USBD,
     vbus_detect: &'static SoftwareVbusDetect,
 ) -> (
     UsbDevice<'static, UsbDriver>,
-    CdcAcmClass<'static, UsbDriver>,
+    &'static mut SerialContext,
+    &'static mut UsbCli,
 ) {
     let driver = Driver::new(usbd, Irqs, vbus_detect);
 
@@ -133,7 +184,48 @@ pub fn init(
     let usb = builder.build();
     interrupt::USBD.set_priority(interrupt::Priority::P3);
 
-    return (usb, class);
+    // Create pipes for communicating from CLI to USB serial thread
+    static USB_TO_CLI_PIPE: StaticCell<pipe::Pipe<NoopRawMutex, MAX_COMMAND_LEN>> =
+        StaticCell::new();
+    let usb_to_cli_pipe = USB_TO_CLI_PIPE.init_with(|| pipe::Pipe::new());
+    let (usb_to_cli_reader, usb_to_cli_writer) = usb_to_cli_pipe.split();
+
+    static CLI_TO_USB_PIPE: StaticCell<pipe::Pipe<NoopRawMutex, MAX_RESPONSE_LEN>> =
+        StaticCell::new();
+    let cli_to_usb_pipe = CLI_TO_USB_PIPE.init_with(|| pipe::Pipe::new());
+    let (cli_to_usb_reader, cli_to_usb_writer) = cli_to_usb_pipe.split();
+
+    // Create the serial context
+    static SERIAL_CONTEXT: StaticCell<SerialContext> = StaticCell::new();
+    let serial_context = SERIAL_CONTEXT.init_with(|| SerialContext {
+        class,
+        writer_to_cli: usb_to_cli_writer,
+        reader_from_cli: cli_to_usb_reader,
+    });
+
+    // Create the CLI
+    static COMMAND_BUFFER: StaticCell<[u8; MAX_COMMAND_LEN]> = StaticCell::new();
+    static HISTORY_BUFFER: StaticCell<[u8; HISTORY_LEN]> = StaticCell::new();
+
+    static SERIAL_PIPE_WRITER: StaticCell<SerialPipeWriter> = StaticCell::new();
+    static USB_CLI: StaticCell<UsbCli> = StaticCell::new();
+    let usb_cli = USB_CLI.init_with(|| UsbCli {
+        inner_cli: CliBuilder::default()
+            .writer(SERIAL_PIPE_WRITER.init_with(|| SerialPipeWriter {
+                writer: cli_to_usb_writer,
+            }))
+            .command_buffer(
+                COMMAND_BUFFER
+                    .init_with(|| [0; MAX_COMMAND_LEN])
+                    .as_mut_slice(),
+            )
+            .history_buffer(HISTORY_BUFFER.init_with(|| [0; HISTORY_LEN]).as_mut_slice())
+            .build()
+            .unwrap(),
+        reader: usb_to_cli_reader,
+    });
+
+    (usb, serial_context, usb_cli)
 }
 
 #[embassy_executor::task]
@@ -142,18 +234,11 @@ pub async fn usb_task(mut device: UsbDevice<'static, UsbDriver>) -> ! {
 }
 
 #[embassy_executor::task]
-pub async fn serial_task(class: CdcAcmClass<'static, UsbDriver>) -> ! {
-    static CONTEXT_CELL: StaticCell<SerialContext> = StaticCell::new();
-    let context = CONTEXT_CELL.init_with(|| SerialContext {
-        class,
-        write_buffer: String::new(),
-        read_buffer: Vec::new(),
-    });
-
+pub async fn serial_task(context: &'static mut SerialContext) -> ! {
     loop {
         context.class.wait_connection().await;
         info!("Connected to USB host");
-        match serial_parser(context).await {
+        match serial_session_handler(context).await {
             Ok(_) | Err(EndpointError::Disabled) => info!("Disconnected from USB host"),
             Err(err) => error!("Unexpected USB error {:?}", err),
         };

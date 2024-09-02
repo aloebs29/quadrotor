@@ -26,3 +26,6 @@ bitfield-struct = "0.6"
 bytemuck = { version = "1.12", features = [ "derive" ] }
 postcard = { version = "1.0.8", features = [ "experimental-derive", "use-defmt" ] }
 serde = { version = "1.0.*", default-features = false }
+embedded-cli = { path = "../../embedded-cli-rs/embedded-cli" }
+embedded-io = "0.6.1"
+ufmt = "0.2.0"

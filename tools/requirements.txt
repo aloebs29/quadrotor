@@ -5,3 +5,5 @@ bleak
 dearpygui
 dearpygui-grid
 ahrs
+# PyGUI grid doesn't specify all of its dependencies -.-
+typing-extensions

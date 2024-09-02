@@ -11,13 +11,12 @@ use nrf_softdevice::{ble, Softdevice};
 use defmt::*;
 use postcard::experimental::max_size::MaxSize;
 
-use quadrotor_x::datatypes::{Command, Telemetry};
+use quadrotor_x::datatypes::{BleCommand, Telemetry};
 use quadrotor_x::utils::lipo_1s_charge_percent_from_voltage;
 
-use crate::datatypes::{CommandSender, TelemetrySignal};
+use crate::datatypes::{BleCommandSender, TelemetrySignal};
 
 const BT_DEVICE_NAME: &str = "Quadcopter";
-static mut BT_ADDRESS: Option<ble::Address> = None;
 
 #[nrf_softdevice::gatt_service(uuid = "180f")]
 struct BatteryService {
@@ -34,7 +33,7 @@ struct TelemetryService {
 #[nrf_softdevice::gatt_service(uuid = "51e426ca-502f-405b-89dc-1b299df7cf32")]
 struct CommandService {
     #[characteristic(uuid = "51e426ca-502f-405b-89dc-1b299df7cf32", write)]
-    command: [u8; Command::POSTCARD_MAX_SIZE],
+    command: [u8; BleCommand::POSTCARD_MAX_SIZE],
 }
 
 #[nrf_softdevice::gatt_server]
@@ -47,14 +46,14 @@ struct ServerInternal {
 pub struct Server<'a> {
     internal: ServerInternal,
     telemetry_signal: &'a TelemetrySignal,
-    command_sender: &'a CommandSender<'a>,
+    command_sender: &'a BleCommandSender<'a>,
 }
 
 impl Server<'_> {
     pub fn new<'a>(
         sd: &mut Softdevice,
         telemetry_signal: &'static TelemetrySignal,
-        command_sender: &'static CommandSender<'static>,
+        command_sender: &'static BleCommandSender<'static>,
     ) -> Result<Self, ble::gatt_server::RegisterError> {
         let internal = ServerInternal::new(sd)?;
 
@@ -145,10 +144,6 @@ pub fn get_softdevice_config() -> nrf_softdevice::Config {
 
 #[embassy_executor::task]
 pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
-    unsafe {
-        BT_ADDRESS = Some(ble::get_address(sd));
-    }
-
     static ADV_DATA: LegacyAdvertisementPayload = LegacyAdvertisementBuilder::new()
         .flags(&[Flag::GeneralDiscovery, Flag::LE_Only])
         .services_16(ServiceList::Complete, &[ServiceUuid16::BATTERY])
@@ -193,7 +188,7 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
             },
             ServerInternalEvent::CommandService(e) => match e {
                 CommandServiceEvent::CommandWrite(command_bytes) => {
-                    if let Ok(command) = postcard::from_bytes::<Command>(&command_bytes) {
+                    if let Ok(command) = postcard::from_bytes::<BleCommand>(&command_bytes) {
                         if let Err(_) = server.command_sender.try_send(command) {
                             error!("Failed to push command onto queue.");
                         }
@@ -211,11 +206,4 @@ pub async fn ble_task(sd: &'static Softdevice, server: Server<'static>) -> ! {
             }
         };
     }
-}
-
-pub fn get_address() -> Option<ble::Address> {
-    // NOTE: The nRF BLE API's get_address command requires a reference to the soft device. This module basically just
-    // reads the address from a context where there is a reference to the soft device (i.e. at the start of the server
-    // task) and stores it for later.
-    unsafe { BT_ADDRESS.clone() }
 }
