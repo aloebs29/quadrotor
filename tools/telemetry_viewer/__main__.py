@@ -64,6 +64,9 @@ class Ui:
         if platform.system() == "Windows":
             scale_factor = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        elif platform.system() == "Linux":
+            # TODO: How to query this?
+            scale_factor = 2.0
 
         dpg.create_context()
 

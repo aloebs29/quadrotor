@@ -33,7 +33,7 @@ async def get_ble_client(query_mac_over_usb=False):
     if query_mac_over_usb:
         # Get BLE address
         with get_usb_serial() as usb_serial:
-            usb_serial.write(b"mac_address\n")
+            usb_serial.write(b"ble-address\n")
 
             response = usb_serial.readline()
             ble_address = bytes.decode(response).strip()
