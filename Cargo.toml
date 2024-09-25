@@ -17,5 +17,7 @@ embassy-usb = { git = "https://github.com/embassy-rs/embassy", rev = "5e92973136
 nrf-softdevice = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "cdee83c0753a0a3c912a67a5bc2e0b46d50aa5ca" }
 nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "cdee83c0753a0a3c912a67a5bc2e0b46d50aa5ca" }
 
+embedded-cli = { git = "https://github.com/aloebs29/embedded-cli-rs", rev = "7a5399db98379794e6a1700397a571a08afbc9de" }
+
 [profile.release]
 debug = 2

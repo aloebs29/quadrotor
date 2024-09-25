@@ -501,6 +501,7 @@ dependencies = [
 [[package]]
 name = "embedded-cli"
 version = "0.2.1"
+source = "git+https://github.com/aloebs29/embedded-cli-rs?rev=7a5399db98379794e6a1700397a571a08afbc9de#7a5399db98379794e6a1700397a571a08afbc9de"
 dependencies = [
  "bitflags 2.5.0",
  "embedded-cli-macros",
@@ -511,6 +512,7 @@ dependencies = [
 [[package]]
 name = "embedded-cli-macros"
 version = "0.2.1"
+source = "git+https://github.com/aloebs29/embedded-cli-rs?rev=7a5399db98379794e6a1700397a571a08afbc9de#7a5399db98379794e6a1700397a571a08afbc9de"
 dependencies = [
  "convert_case",
  "darling 0.20.8",
