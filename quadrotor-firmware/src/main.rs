@@ -8,7 +8,8 @@ use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
-use embassy_nrf::pac;
+use embassy_nrf::{pac, Peripheral};
+use embassy_nrf::pwm;
 use embassy_nrf::saadc;
 use embassy_nrf::twim::{self, Twim};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
@@ -111,6 +112,20 @@ async fn main(spawner: Spawner) {
     let mut pressure_sensor = unsafe { dps310::DPS310_HANDLE.take() };
     unwrap!(pressure_sensor.configure(&mut twim).await);
 
+    // Initialize PWM
+    let mut pwm = pwm::SimplePwm::new_4ch(
+        p.PWM0, 
+        p.P0_07,    // NRF52840 feather D6
+        p.P0_26,    // NRF52840 feather D9
+        p.P0_27,    // NRF52840 feather D10
+        p.P0_06);   // NRF52840 feather D11
+    pwm.set_prescaler(pwm::Prescaler::Div1);
+    pwm.set_max_duty(1000);
+    pwm.set_duty(0, 1000);
+    pwm.set_duty(1, 1000);
+    pwm.set_duty(2, 1000);
+    pwm.set_duty(3, 1000);
+
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
     unwrap!(spawner.spawn(usb_serial::usb_task(usb_driver)));
@@ -165,7 +180,7 @@ async fn main(spawner: Spawner) {
         let _ = usb_cli.process_pending_commands(|cli_handle, command| match command {
             UsbCommand::BleAddress => {
                 let address = nrf_softdevice::ble::get_address(sd).bytes();
-                let _ = uwrite!(
+                uwrite!(
                     cli_handle.writer(),
                     "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
                     address[5],
@@ -174,9 +189,22 @@ async fn main(spawner: Spawner) {
                     address[2],
                     address[1],
                     address[0]
-                );
+                )?;
                 Ok(())
-            }
+            },
+            UsbCommand::PwmSet { id, duty } => {
+                if id <= 3 {
+                    if duty >= 0.0 && duty <= 1.0 {
+                        uwrite!(cli_handle.writer(), "Setting output to {}%.", (duty * 100.0) as u32)?;
+                        pwm.set_duty(id as usize, (1000.0 - (duty * 1000.0)) as u16);
+                    } else {
+                        uwrite!(cli_handle.writer(), "Invalid duty cycle.")?;
+                    }
+                } else {
+                    uwrite!(cli_handle.writer(), "Invalid PWM ID {}.", id)?;
+                }
+                Ok(())
+            },
         });
 
         // ==============

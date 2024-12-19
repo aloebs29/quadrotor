@@ -76,7 +76,7 @@ pub struct UsbCli {
 impl UsbCli {
     pub fn process_pending_commands(
         &mut self,
-        handler: impl Fn(
+        mut handler: impl FnMut(
             &mut CliHandle<&mut SerialPipeWriter, SerialPipeWriteError>,
             UsbCommand,
         ) -> Result<(), SerialPipeWriteError>,

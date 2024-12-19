@@ -10,6 +10,13 @@ const BLE_COMMAND_CHANNEL_LEN: usize = 8;
 pub enum UsbCommand {
     /// Retrieve the device's BLE address
     BleAddress,
+    /// Set a PWM output
+    PwmSet {
+        /// ID of the PWM output (0-3)
+        id: u8,
+        /// Normalized duty cycle (0.0 -> 1.0)
+        duty: f32,
+    },
 }
 
 pub type TelemetrySignal = Signal<NoopRawMutex, Telemetry>;
