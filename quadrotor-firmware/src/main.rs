@@ -8,10 +8,11 @@ use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
-use embassy_nrf::{pac, Peripheral};
+use embassy_nrf::pac;
 use embassy_nrf::pwm;
 use embassy_nrf::saadc;
 use embassy_nrf::twim::{self, Twim};
+use embassy_nrf::usb;
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::{bind_interrupts, interrupt, peripherals};
 use embassy_nrf::interrupt::InterruptExt;
@@ -49,6 +50,10 @@ bind_interrupts!(struct SaadcIrqs {
     SAADC => saadc::InterruptHandler;
 });
 
+bind_interrupts!(struct UsbdIrqs {
+    USBD => usb::InterruptHandler<peripherals::USBD>;
+});
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("Quadcopter flight controller");
@@ -83,7 +88,9 @@ async fn main(spawner: Spawner) {
     let ble_command_receiver = ble_command_channel.receiver();
 
     // Initialize USB
-    let (usb_driver, serial_context, usb_cli) = usb_serial::init(p.USBD, vbus_detect);
+    interrupt::USBD.set_priority(interrupt::Priority::P3);
+    let usb_driver = usb::Driver::new(p.USBD, UsbdIrqs, &*vbus_detect);
+    let (usb_device, serial_context, usb_cli) = usb_serial::init(usb_driver);
 
     // Initialize BLE peripheral server
     let server = unwrap!(ble_server::Server::new(
@@ -128,7 +135,7 @@ async fn main(spawner: Spawner) {
 
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
-    unwrap!(spawner.spawn(usb_serial::usb_task(usb_driver)));
+    unwrap!(spawner.spawn(usb_serial::usb_task(usb_device)));
     unwrap!(spawner.spawn(usb_serial::serial_task(serial_context)));
     unwrap!(spawner.spawn(ble_server::ble_task(sd, server)));
 

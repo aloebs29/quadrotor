@@ -1,8 +1,7 @@
 use embassy_futures::select::{select, Either};
-use embassy_nrf::interrupt::InterruptExt;
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
-use embassy_nrf::{bind_interrupts, interrupt, peripherals, usb};
+use embassy_nrf::peripherals;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::pipe;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
@@ -20,10 +19,6 @@ const USB_MAX_PACKET_SIZE: u8 = 8;
 const MAX_COMMAND_LEN: usize = 128;
 const MAX_RESPONSE_LEN: usize = 128;
 const HISTORY_LEN: usize = 1024;
-
-bind_interrupts!(struct Irqs {
-    USBD => usb::InterruptHandler<peripherals::USBD>;
-});
 
 pub type UsbDriver = Driver<'static, peripherals::USBD, &'static SoftwareVbusDetect>;
 
@@ -134,15 +129,12 @@ async fn serial_session_handler(context: &mut SerialContext) -> UsbResult<()> {
 }
 
 pub fn init(
-    usbd: peripherals::USBD,
-    vbus_detect: &'static SoftwareVbusDetect,
+    driver: UsbDriver,
 ) -> (
     UsbDevice<'static, UsbDriver>,
     &'static mut SerialContext,
     &'static mut UsbCli,
 ) {
-    let driver = Driver::new(usbd, Irqs, vbus_detect);
-
     // Create embassy-usb Config
     let mut config = Config::new(0xfeed, 0xface);
     config.manufacturer = Some("your");
@@ -182,7 +174,6 @@ pub fn init(
 
     // Build the builder.
     let usb = builder.build();
-    interrupt::USBD.set_priority(interrupt::Priority::P3);
 
     // Create pipes for communicating from CLI to USB serial thread
     static USB_TO_CLI_PIPE: StaticCell<pipe::Pipe<NoopRawMutex, MAX_COMMAND_LEN>> =
