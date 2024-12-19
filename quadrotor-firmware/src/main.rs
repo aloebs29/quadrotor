@@ -13,6 +13,7 @@ use embassy_nrf::saadc;
 use embassy_nrf::twim::{self, Twim};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::{bind_interrupts, interrupt, peripherals};
+use embassy_nrf::interrupt::InterruptExt;
 
 use nrf_softdevice::{SocEvent, Softdevice};
 
@@ -93,11 +94,13 @@ async fn main(spawner: Spawner) {
     // Initialize ADC
     let adc_config = saadc::Config::default();
     let adc_channel_config = saadc::ChannelConfig::single_ended(p.P0_29);
+    interrupt::SAADC.set_priority(interrupt::Priority::P2);
     let mut adc = saadc::Saadc::new(p.SAADC, SaadcIrqs, adc_config, [adc_channel_config]);
 
     // Initialize I2C
     let mut i2c_config = twim::Config::default();
     i2c_config.frequency = twim::Frequency::K400;
+    interrupt::SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0.set_priority(interrupt::Priority::P2);
     let mut twim = Twim::new(p.TWISPI0, I2cIrqs, p.P0_12, p.P0_11, i2c_config);
 
     // Initialize sensors
