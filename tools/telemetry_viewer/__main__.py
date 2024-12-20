@@ -37,7 +37,7 @@ class _BleThread(Thread):
             while not self.stop_event.is_set():
                 try:
                     command = self.command_queue.get_nowait()
-                    await ble_client.write_gatt_char(COMMAND_CHARACTERISTIC, command, response=False)
+                    await ble_client.write_gatt_char(COMMAND_CHARACTERISTIC, command, response=True)
                 except Empty:
                     await asyncio.sleep(0.1)
             await ble_client.stop_notify(TELEMETRY_CHARACTERISTIC)
