@@ -23,13 +23,12 @@ use static_cell::StaticCell;
 use ufmt::uwrite;
 
 use quadrotor_firmware::ble_server;
-use quadrotor_firmware::datatypes::{
-    BleCommandChannel, BleCommandSender, TelemetrySignal, UsbCommand,
-};
+use quadrotor_firmware::datatypes::{BleCommandChannel, BleCommandSender, ControllerState, ControllerStateSignal, TelemetrySignal, UsbCommand};
 use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::motor;
+use quadrotor_firmware::status_led;
 use quadrotor_firmware::usb_serial;
 
 use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
@@ -86,6 +85,11 @@ async fn main(spawner: Spawner) {
     static BLE_COMMAND_SENDER: StaticCell<BleCommandSender> = StaticCell::new();
     let ble_command_sender = BLE_COMMAND_SENDER.init(ble_command_channel.sender());
     let ble_command_receiver = ble_command_channel.receiver();
+    static CONTROLLER_STATE_SIGNAL: StaticCell<ControllerStateSignal> = StaticCell::new();
+    let controller_state_signal = CONTROLLER_STATE_SIGNAL.init(ControllerStateSignal::new());
+
+    // Initialize LED
+    let led = Output::new(p.P1_10, Level::Low, OutputDrive::Standard);
 
     // Initialize USB
     interrupt::USBD.set_priority(interrupt::Priority::P3);
@@ -119,7 +123,7 @@ async fn main(spawner: Spawner) {
     let mut pressure_sensor = unsafe { dps310::DPS310_HANDLE.take() };
     unwrap!(pressure_sensor.configure(&mut twim).await);
 
-    // Initialize PWM
+    // Initialize motor outputs
     let mut outputs = motor::MotorOutputs::new(
         p.PWM0,
         p.P0_07.into(),     // NRF52840 feather D6
@@ -127,15 +131,17 @@ async fn main(spawner: Spawner) {
         p.P0_27.into(),     // NRF52840 feather D10
         p.P0_06.into());    // NRF52840 feather D11
 
+    // TODO: Move this into controller
+    controller_state_signal.signal(ControllerState::Inactive);
+
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
+    unwrap!(spawner.spawn(status_led::status_led_task(led, controller_state_signal)));
     unwrap!(spawner.spawn(usb_serial::usb_task(usb_device)));
     unwrap!(spawner.spawn(usb_serial::serial_task(serial_context)));
     unwrap!(spawner.spawn(ble_server::ble_task(sd, server)));
 
     // Set up main control loop
-    let mut led = Output::new(p.P1_10, Level::Low, OutputDrive::Standard);
-
     let mut next_iter_start = Instant::now();
     let mut timestamp = next_iter_start.as_millis() as f32 * MS_TO_SEC;
     let mut error_count = 0u32;
@@ -175,6 +181,14 @@ async fn main(spawner: Spawner) {
                         (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize,
                     );
                     accel_offset_state = Some(AccelOffsetState::InProgress(builder));
+                },
+                BleCommand::ActivateController(activate) => {
+                    let controller_state = if activate {
+                        ControllerState::Active
+                    } else {
+                        ControllerState::Inactive
+                    };
+                    controller_state_signal.signal(controller_state);
                 }
             }
         }
@@ -210,8 +224,6 @@ async fn main(spawner: Spawner) {
 
         // ==============
         // Perform measurements
-        led.set_high();
-
         let new_timestamp = embassy_time::Instant::now().as_millis() as f32 * MS_TO_SEC;
         let delta_t = new_timestamp - timestamp;
         timestamp = new_timestamp;
@@ -236,8 +248,6 @@ async fn main(spawner: Spawner) {
             Ok(None) => (), // new measurement wasn't ready
             Err(_) => error_count += 1,
         }
-
-        led.set_low();
         // ==============
 
         // Update and/or apply corrections

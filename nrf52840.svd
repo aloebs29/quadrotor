@@ -1468,13 +1468,13 @@ POSSIBILITY OF SUCH DAMAGE.\n
         </register>
         <register>
           <name>TASKS_CTSTART</name>
-          <description>Start calibration timer</description>
+          <description>Start calibration Timer</description>
           <addressOffset>0x014</addressOffset>
           <access>write-only</access>
           <fields>
             <field>
               <name>TASKS_CTSTART</name>
-              <description>Start calibration timer</description>
+              <description>Start calibration Timer</description>
               <lsb>0</lsb>
               <msb>0</msb>
               <enumeratedValues>
@@ -1489,13 +1489,13 @@ POSSIBILITY OF SUCH DAMAGE.\n
         </register>
         <register>
           <name>TASKS_CTSTOP</name>
-          <description>Stop calibration timer</description>
+          <description>Stop calibration Timer</description>
           <addressOffset>0x018</addressOffset>
           <access>write-only</access>
           <fields>
             <field>
               <name>TASKS_CTSTOP</name>
-              <description>Stop calibration timer</description>
+              <description>Stop calibration Timer</description>
               <lsb>0</lsb>
               <msb>0</msb>
               <enumeratedValues>
@@ -1588,13 +1588,13 @@ POSSIBILITY OF SUCH DAMAGE.\n
         </register>
         <register>
           <name>EVENTS_CTTO</name>
-          <description>Calibration timer timeout</description>
+          <description>Calibration Timer timeout</description>
           <addressOffset>0x110</addressOffset>
           <access>read-write</access>
           <fields>
             <field>
               <name>EVENTS_CTTO</name>
-              <description>Calibration timer timeout</description>
+              <description>Calibration Timer timeout</description>
               <lsb>0</lsb>
               <msb>0</msb>
               <enumeratedValues>
@@ -1614,13 +1614,13 @@ POSSIBILITY OF SUCH DAMAGE.\n
         </register>
         <register>
           <name>EVENTS_CTSTARTED</name>
-          <description>Calibration timer has been started and is ready to process new tasks</description>
+          <description>Calibration Timer has been started and is ready to process new tasks</description>
           <addressOffset>0x128</addressOffset>
           <access>read-write</access>
           <fields>
             <field>
               <name>EVENTS_CTSTARTED</name>
-              <description>Calibration timer has been started and is ready to process new tasks</description>
+              <description>Calibration Timer has been started and is ready to process new tasks</description>
               <lsb>0</lsb>
               <msb>0</msb>
               <enumeratedValues>
@@ -1640,13 +1640,13 @@ POSSIBILITY OF SUCH DAMAGE.\n
         </register>
         <register>
           <name>EVENTS_CTSTOPPED</name>
-          <description>Calibration timer has been stopped and is ready to process new tasks</description>
+          <description>Calibration Timer has been stopped and is ready to process new tasks</description>
           <addressOffset>0x12C</addressOffset>
           <access>read-write</access>
           <fields>
             <field>
               <name>EVENTS_CTSTOPPED</name>
-              <description>Calibration timer has been stopped and is ready to process new tasks</description>
+              <description>Calibration Timer has been stopped and is ready to process new tasks</description>
               <lsb>0</lsb>
               <msb>0</msb>
               <enumeratedValues>
@@ -2276,13 +2276,13 @@ POSSIBILITY OF SUCH DAMAGE.\n
         </register>
         <register>
           <name>CTIV</name>
-          <description>Calibration timer interval</description>
+          <description>Calibration Timer interval</description>
           <addressOffset>0x538</addressOffset>
           <access>read-write</access>
           <fields>
             <field>
               <name>CTIV</name>
-              <description>Calibration timer interval in multiple of 0.25 seconds. Range: 0.25 seconds to 31.75 seconds.</description>
+              <description>Calibration Timer interval in multiple of 0.25 seconds. Range: 0.25 seconds to 31.75 seconds.</description>
               <lsb>0</lsb>
               <msb>6</msb>
             </field>
@@ -19799,7 +19799,7 @@ POSSIBILITY OF SUCH DAMAGE.\n
                 </enumeratedValue>
                 <enumeratedValue>
                   <name>CPUPending</name>
-                  <description>Semaphore is assigned to SPI but a handover to the CPU is pending</description>
+                  <description>Semaphore is assigned to SPI but a handover to the CPU is Pending</description>
                   <value>3</value>
                 </enumeratedValue>
               </enumeratedValues>
@@ -25758,7 +25758,7 @@ POSSIBILITY OF SUCH DAMAGE.\n
               <enumeratedValues>
                 <enumeratedValue>
                   <name>FreeRun</name>
-                  <description>Transmission is independent of frame timer and will start when the STARTTX task is triggered. No timeout.</description>
+                  <description>Transmission is independent of frame Timer and will start when the STARTTX task is triggered. No timeout.</description>
                   <value>0</value>
                 </enumeratedValue>
                 <enumeratedValue>
@@ -29460,7 +29460,7 @@ POSSIBILITY OF SUCH DAMAGE.\n
                 </enumeratedValue>
                 <enumeratedValue>
                   <name>Timers</name>
-                  <description>Rate is controlled from local timer (use CC to control the rate)</description>
+                  <description>Rate is controlled from local Timer (use CC to control the rate)</description>
                   <value>1</value>
                 </enumeratedValue>
               </enumeratedValues>
@@ -29621,13 +29621,13 @@ POSSIBILITY OF SUCH DAMAGE.\n
         </register>
         <register>
           <name>TASKS_SHUTDOWN</name>
-          <description>Deprecated register - Shut down timer</description>
+          <description>Deprecated register - Shut down Timer</description>
           <addressOffset>0x010</addressOffset>
           <access>write-only</access>
           <fields>
             <field>
               <name>TASKS_SHUTDOWN</name>
-              <description>Deprecated field -  Shut down timer</description>
+              <description>Deprecated field -  Shut down Timer</description>
               <lsb>0</lsb>
               <msb>0</msb>
               <enumeratedValues>
@@ -30300,22 +30300,22 @@ POSSIBILITY OF SUCH DAMAGE.\n
               <enumeratedValues>
                 <enumeratedValue>
                   <name>16Bit</name>
-                  <description>16 bit timer bit width</description>
+                  <description>16 bit Timer bit width</description>
                   <value>0</value>
                 </enumeratedValue>
                 <enumeratedValue>
                   <name>08Bit</name>
-                  <description>8 bit timer bit width</description>
+                  <description>8 bit Timer bit width</description>
                   <value>1</value>
                 </enumeratedValue>
                 <enumeratedValue>
                   <name>24Bit</name>
-                  <description>24 bit timer bit width</description>
+                  <description>24 bit Timer bit width</description>
                   <value>2</value>
                 </enumeratedValue>
                 <enumeratedValue>
                   <name>32Bit</name>
-                  <description>32 bit timer bit width</description>
+                  <description>32 bit Timer bit width</description>
                   <value>3</value>
                 </enumeratedValue>
               </enumeratedValues>
@@ -33867,7 +33867,7 @@ POSSIBILITY OF SUCH DAMAGE.\n
               <enumeratedValues>
                 <enumeratedValue>
                   <name>Reload</name>
-                  <description>Value to request a reload of the watchdog timer</description>
+                  <description>Value to request a reload of the watchdog Timer</description>
                   <value>0x6E524635</value>
                 </enumeratedValue>
               </enumeratedValues>

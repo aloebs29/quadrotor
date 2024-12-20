@@ -115,6 +115,9 @@ class _PostcardSerializer:
     def __init__(self):
         self._bytes = bytes()
 
+    def push_bool(self, val):
+        self._bytes += (1 if val else 0).to_bytes()
+
     def push_f32(self, val):
         self._bytes += struct.pack("<f", val)
 
@@ -157,4 +160,11 @@ class Command:
         ser = _PostcardSerializer()
         ser.push_varint(0)
         ser.push_f32(seconds)
+        return ser.get_bytes()
+
+    @staticmethod
+    def activate_controller(activate):
+        ser = _PostcardSerializer()
+        ser.push_varint(1)
+        ser.push_bool(activate)
         return ser.get_bytes()

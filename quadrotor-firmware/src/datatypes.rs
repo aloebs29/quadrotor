@@ -24,3 +24,9 @@ pub type TelemetrySignal = Signal<NoopRawMutex, Telemetry>;
 pub type BleCommandChannel = Channel<NoopRawMutex, BleCommand, BLE_COMMAND_CHANNEL_LEN>;
 pub type BleCommandSender<'a> = Sender<'a, NoopRawMutex, BleCommand, BLE_COMMAND_CHANNEL_LEN>;
 pub type BleCommandReceiver<'a> = Receiver<'a, NoopRawMutex, BleCommand, BLE_COMMAND_CHANNEL_LEN>;
+
+pub enum ControllerState {
+    Inactive,
+    Active,
+}
+pub type ControllerStateSignal = Signal<NoopRawMutex, ControllerState>;

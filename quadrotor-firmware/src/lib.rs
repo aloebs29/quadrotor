@@ -9,5 +9,6 @@ pub mod dps310;
 pub mod fxas21002;
 pub mod fxos8700;
 pub mod motor;
+pub mod status_led;
 pub mod usb_serial;
 pub mod xerror;

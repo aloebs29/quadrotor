@@ -91,6 +91,9 @@ class Ui:
                                             callback=self._update_calibrate_accel_time)
                         dpg.add_button(label="Calibrate Accel", callback=self._calibrate_accel_button_cb)
                     with dpg.table_row():
+                        dpg.add_button(label="Deactivate Controller", callback=self._deactivate_controller_button_cb)
+                        dpg.add_button(label="Activate Controller", callback=self._activate_controller_button_cb)
+                    with dpg.table_row():
                         self.error_count_label = dpg.add_text("Error count: ")
                     with dpg.table_row():
                         self.battery_level_label = dpg.add_text("Battery level: ")
@@ -148,11 +151,17 @@ class Ui:
             dpg.add_item_visible_handler(callback=grid)
         dpg.bind_item_handler_registry(window, window_hr)
 
-    def _update_calibrate_accel_time(self, sender, app_data):
+    def _update_calibrate_accel_time(self, _sender, app_data):
         self.calibrate_accel_time = app_data
 
-    def _calibrate_accel_button_cb(self, sender, app_data):
+    def _calibrate_accel_button_cb(self, _sender, _app_data):
         self.command_queue.put(Command.calibrate_accel(self.calibrate_accel_time))
+
+    def _deactivate_controller_button_cb(self, _sender, _app_data):
+        self.command_queue.put(Command.activate_controller(False))
+
+    def _activate_controller_button_cb(self, _sender, _app_data):
+        self.command_queue.put(Command.activate_controller(True))
 
     def run(self):
         timestamp_offset = None
