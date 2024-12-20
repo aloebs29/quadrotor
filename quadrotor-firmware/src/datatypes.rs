@@ -25,6 +25,7 @@ pub type BleCommandChannel = Channel<NoopRawMutex, BleCommand, BLE_COMMAND_CHANN
 pub type BleCommandSender<'a> = Sender<'a, NoopRawMutex, BleCommand, BLE_COMMAND_CHANNEL_LEN>;
 pub type BleCommandReceiver<'a> = Receiver<'a, NoopRawMutex, BleCommand, BLE_COMMAND_CHANNEL_LEN>;
 
+#[derive(Copy, Clone)]
 pub enum ControllerState {
     Inactive,
     Active,

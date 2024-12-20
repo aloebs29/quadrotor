@@ -4,10 +4,9 @@
 use core::mem;
 
 use embassy_executor::Spawner;
-use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
 
-use embassy_nrf::gpio::{ Level, Output, OutputDrive};
+use embassy_nrf::gpio::{Level, Output, OutputDrive};
 use embassy_nrf::pac;
 use embassy_nrf::saadc;
 use embassy_nrf::twim::{self, Twim};
@@ -22,7 +21,9 @@ use defmt::{info, unwrap};
 use static_cell::StaticCell;
 use ufmt::uwrite;
 
+use quadrotor_firmware::battery;
 use quadrotor_firmware::ble_server;
+use quadrotor_firmware::controller;
 use quadrotor_firmware::datatypes::{BleCommandChannel, BleCommandSender, ControllerState, ControllerStateSignal, TelemetrySignal, UsbCommand};
 use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
@@ -31,14 +32,9 @@ use quadrotor_firmware::motor;
 use quadrotor_firmware::status_led;
 use quadrotor_firmware::usb_serial;
 
-use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
-use quadrotor_x::datatypes::{BleCommand, Quatf, Telemetry, Vec3f};
-use quadrotor_x::sensor_fusion;
+use quadrotor_x::datatypes::BleCommand;
 
-const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
-const VBAT_DIVIDER: f32 = 568.75;
-
 const MS_TO_SEC: f32 = 0.001;
 
 bind_interrupts!(struct I2cIrqs {
@@ -85,8 +81,10 @@ async fn main(spawner: Spawner) {
     static BLE_COMMAND_SENDER: StaticCell<BleCommandSender> = StaticCell::new();
     let ble_command_sender = BLE_COMMAND_SENDER.init(ble_command_channel.sender());
     let ble_command_receiver = ble_command_channel.receiver();
+    let mut controller_state = ControllerState::Inactive;
     static CONTROLLER_STATE_SIGNAL: StaticCell<ControllerStateSignal> = StaticCell::new();
     let controller_state_signal = CONTROLLER_STATE_SIGNAL.init(ControllerStateSignal::new());
+    controller_state_signal.signal(controller_state);
 
     // Initialize LED
     let led = Output::new(p.P1_10, Level::Low, OutputDrive::Standard);
@@ -104,10 +102,10 @@ async fn main(spawner: Spawner) {
     ));
 
     // Initialize ADC
-    let adc_config = saadc::Config::default();
-    let adc_channel_config = saadc::ChannelConfig::single_ended(p.P0_29);
+    let battery_adc_config = saadc::Config::default();
+    let battery_adc_channel_config = saadc::ChannelConfig::single_ended(p.P0_29);
     interrupt::SAADC.set_priority(interrupt::Priority::P2);
-    let mut adc = saadc::Saadc::new(p.SAADC, SaadcIrqs, adc_config, [adc_channel_config]);
+    let battery_adc = saadc::Saadc::new(p.SAADC, SaadcIrqs, battery_adc_config, [battery_adc_channel_config]);
 
     // Initialize I2C
     let mut i2c_config = twim::Config::default();
@@ -122,6 +120,7 @@ async fn main(spawner: Spawner) {
     unwrap!(gyro_sensor.configure(&mut twim).await);
     let mut pressure_sensor = unsafe { dps310::DPS310_HANDLE.take() };
     unwrap!(pressure_sensor.configure(&mut twim).await);
+    let battery_reader = battery::BatteryReader::new(battery_adc);
 
     // Initialize motor outputs
     let mut outputs = motor::MotorOutputs::new(
@@ -130,9 +129,6 @@ async fn main(spawner: Spawner) {
         p.P0_26.into(),     // NRF52840 feather D9
         p.P0_27.into(),     // NRF52840 feather D10
         p.P0_06.into());    // NRF52840 feather D11
-
-    // TODO: Move this into controller
-    controller_state_signal.signal(ControllerState::Inactive);
 
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
@@ -143,47 +139,30 @@ async fn main(spawner: Spawner) {
 
     // Set up main control loop
     let mut next_iter_start = Instant::now();
-    let mut timestamp = next_iter_start.as_millis() as f32 * MS_TO_SEC;
-    let mut error_count = 0u32;
-
-    let mut accel_msmt = Vec3f::zeroed();
-    let mut mag_msmt = Vec3f::zeroed();
-    let mut gyro_msmt = Vec3f::zeroed();
-    let mut adc_msmt_buf = [0i16; 1];
-
-    let mut orientation = Quatf::default();
-
-    // NOTE: We don't want to start running the control loop with some default pressure measurement, because then our
-    // initial altitude will be way off. Wait until the pressure sensor returns a valid reading.
-    let initial_pressure_timeout =
-        Instant::now() + Duration::from_millis(INITIAL_PRESSURE_TIMEOUT_MS);
-    let mut pressure_msmt = loop {
-        if let Ok(Some(p)) = pressure_sensor.read(&mut twim).await {
-            break p;
-        }
-        if Instant::now() > initial_pressure_timeout {
-            panic!("Timed out while waiting for initial pressure sensor reading.");
-        }
-    };
-
-    let mut accel_offset_state: Option<AccelOffsetState> = None;
+    let mut controller = unwrap!(controller::Controller::create_and_initialize(
+        &mut twim,
+        accel_and_mag_sensor,
+        gyro_sensor,
+        pressure_sensor,
+        battery_reader,
+        next_iter_start.as_millis() as f32 * MS_TO_SEC,
+        telemetry_signal,
+    ).await);
 
     loop {
         next_iter_start += Duration::from_millis(MAIN_LOOP_INTERVAL_MS);
         Timer::at(next_iter_start).await;
 
         // ==============
-        // Handle commands
+        // Handle BLE commands
         while let Ok(command) = ble_command_receiver.try_receive() {
             match command {
                 BleCommand::CalibrateAccel(duration_sec) => {
-                    let builder = AccelOffsetsBuilder::new(
-                        (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize,
-                    );
-                    accel_offset_state = Some(AccelOffsetState::InProgress(builder));
+                    controller.start_accel_calibration(
+                        (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize);
                 },
                 BleCommand::ActivateController(activate) => {
-                    let controller_state = if activate {
+                    controller_state = if activate {
                         ControllerState::Active
                     } else {
                         ControllerState::Inactive
@@ -192,10 +171,13 @@ async fn main(spawner: Spawner) {
                 }
             }
         }
+
+        // ==============
+        // Handle USB CLI commands
         let _ = usb_cli.process_pending_commands(|cli_handle, command| match command {
             UsbCommand::BleAddress => {
                 let address = nrf_softdevice::ble::get_address(sd).bytes();
-                uwrite!(
+                let _ = uwrite!(
                     cli_handle.writer(),
                     "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
                     address[5],
@@ -208,74 +190,29 @@ async fn main(spawner: Spawner) {
                 Ok(())
             },
             UsbCommand::PwmSet { id, duty } => {
-                if id <= 3 {
-                    if duty >= 0.0 && duty <= 1.0 {
-                        uwrite!(cli_handle.writer(), "Setting output to {}%.", (duty * 100.0) as u32)?;
-                        outputs.set(id.into(), duty);
+                // TODO: This nesting is ugly
+                if let ControllerState::Inactive = controller_state {
+                    if id <= 3 {
+                        if duty >= 0.0 && duty <= 1.0 {
+                            let _ = uwrite!(cli_handle.writer(), "Setting output to {}%.", (duty * 100.0) as u32)?;
+                            outputs.set(id.into(), duty);
+                        } else {
+                            let _ = uwrite!(cli_handle.writer(), "Invalid duty cycle.")?;
+                        }
                     } else {
-                        uwrite!(cli_handle.writer(), "Invalid duty cycle.")?;
+                        let _ = uwrite!(cli_handle.writer(), "Invalid PWM ID {}.", id)?;
                     }
                 } else {
-                    uwrite!(cli_handle.writer(), "Invalid PWM ID {}.", id)?;
+                    let _ = uwrite!(cli_handle.writer(), "Controller is activated; manual PWM entry disallowed.");
                 }
                 Ok(())
             },
         });
 
         // ==============
-        // Perform measurements
-        let new_timestamp = embassy_time::Instant::now().as_millis() as f32 * MS_TO_SEC;
-        let delta_t = new_timestamp - timestamp;
-        timestamp = new_timestamp;
-
-        // NOTE: I2C transactions need to happen in a serial fashion, since they all use the same I2C bus. However, the
-        //       ADC read can happen in parallel with one of those I2C transactions.
-        let adc_fut = adc.sample(&mut adc_msmt_buf);
-        let accel_and_mag_fut =
-            accel_and_mag_sensor.read(&mut twim, &mut accel_msmt, &mut mag_msmt);
-        let (_, accel_and_mag_result) = join(adc_fut, accel_and_mag_fut).await;
-        if let Err(_) = accel_and_mag_result {
-            error_count += 1;
-        }
-        let battery_voltage = adc_msmt_buf[0] as f32 / VBAT_DIVIDER;
-
-        if let Err(_) = gyro_sensor.read(&mut twim, &mut gyro_msmt).await {
-            error_count += 1;
-        };
-
-        match pressure_sensor.read(&mut twim).await {
-            Ok(Some(p)) => pressure_msmt = p,
-            Ok(None) => (), // new measurement wasn't ready
-            Err(_) => error_count += 1,
-        }
-        // ==============
-
-        // Update and/or apply corrections
-        if let Some(ref inner_offset_state) = accel_offset_state {
-            match inner_offset_state {
-                AccelOffsetState::InProgress(builder) => {
-                    let new_inner_offset_state = builder.update(accel_msmt);
-                    accel_offset_state = Some(new_inner_offset_state);
-                }
-                AccelOffsetState::Ready(offsets) => {
-                    accel_msmt = offsets.apply(accel_msmt);
-                }
-            }
-        }
-
-        // Compute orientation
-        orientation =
-            sensor_fusion::madgwick_fusion_9(orientation, accel_msmt, gyro_msmt, mag_msmt, delta_t);
-        telemetry_signal.signal(Telemetry {
-            timestamp,
-            error_count,
-            battery_voltage,
-            accel: accel_msmt.into(),
-            gyro: gyro_msmt.into(),
-            mag: mag_msmt.into(),
-            pressure: pressure_msmt,
-            orientation: orientation.into(),
-        });
+        // Update controls
+        controller.update(&mut twim, Instant::now().as_millis() as f32 * MS_TO_SEC).await;
+        // TODO: If controller is active, use return vals from update to set motor outputs.
     }
 }
 
