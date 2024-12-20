@@ -8,5 +8,6 @@ pub mod datatypes;
 pub mod dps310;
 pub mod fxas21002;
 pub mod fxos8700;
+pub mod motor;
 pub mod usb_serial;
 pub mod xerror;

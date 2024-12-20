@@ -7,9 +7,8 @@ use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
 
-use embassy_nrf::gpio::{Level, Output, OutputDrive};
+use embassy_nrf::gpio::{ Level, Output, OutputDrive};
 use embassy_nrf::pac;
-use embassy_nrf::pwm;
 use embassy_nrf::saadc;
 use embassy_nrf::twim::{self, Twim};
 use embassy_nrf::usb;
@@ -30,6 +29,7 @@ use quadrotor_firmware::datatypes::{
 use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
+use quadrotor_firmware::motor;
 use quadrotor_firmware::usb_serial;
 
 use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
@@ -120,18 +120,12 @@ async fn main(spawner: Spawner) {
     unwrap!(pressure_sensor.configure(&mut twim).await);
 
     // Initialize PWM
-    let mut pwm = pwm::SimplePwm::new_4ch(
-        p.PWM0, 
-        p.P0_07,    // NRF52840 feather D6
-        p.P0_26,    // NRF52840 feather D9
-        p.P0_27,    // NRF52840 feather D10
-        p.P0_06);   // NRF52840 feather D11
-    pwm.set_prescaler(pwm::Prescaler::Div1);
-    pwm.set_max_duty(1000);
-    pwm.set_duty(0, 1000);
-    pwm.set_duty(1, 1000);
-    pwm.set_duty(2, 1000);
-    pwm.set_duty(3, 1000);
+    let mut outputs = motor::MotorOutputs::new(
+        p.PWM0,
+        p.P0_07.into(),     // NRF52840 feather D6
+        p.P0_26.into(),     // NRF52840 feather D9
+        p.P0_27.into(),     // NRF52840 feather D10
+        p.P0_06.into());    // NRF52840 feather D11
 
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
@@ -203,7 +197,7 @@ async fn main(spawner: Spawner) {
                 if id <= 3 {
                     if duty >= 0.0 && duty <= 1.0 {
                         uwrite!(cli_handle.writer(), "Setting output to {}%.", (duty * 100.0) as u32)?;
-                        pwm.set_duty(id as usize, (1000.0 - (duty * 1000.0)) as u16);
+                        outputs.set(id.into(), duty);
                     } else {
                         uwrite!(cli_handle.writer(), "Invalid duty cycle.")?;
                     }
