@@ -12,7 +12,7 @@ defmt = [
 
 [dependencies]
 micromath = { version = "2.1.0", features = ["quaternion", "vector"] }
-postcard = { version = "1.0.8", features = [ "experimental-derive"] }
+postcard = { version = "1.0.8", features = ["experimental-derive"] }
 serde = { version = "1.0.*", default-features = false }
 
 defmt = { version = "0.3", optional = true }

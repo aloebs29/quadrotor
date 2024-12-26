@@ -116,7 +116,7 @@ pub fn get_softdevice_config() -> nrf_softdevice::Config {
             conn_count: raw::BLE_GAP_CONN_COUNT_DEFAULT as u8,
             event_length: 24,
         }),
-        conn_gatt: Some(raw::ble_gatt_conn_cfg_t { att_mtu: 128 }),
+        conn_gatt: Some(raw::ble_gatt_conn_cfg_t { att_mtu: 256 }),
         gatts_attr_tab_size: Some(raw::ble_gatts_cfg_attr_tab_size_t {
             attr_tab_size: raw::BLE_GATTS_ATTR_TAB_SIZE_DEFAULT,
         }),

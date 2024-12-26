@@ -82,6 +82,29 @@ class Quaternion:
         return np.array([self.w, self.x, self.y, self.z])
 
 
+@dataclass
+class PidParams:
+    p: float
+    i: float
+    d: float
+
+
+@dataclass
+class ControllerParams:
+    linear: PidParams
+    roll: PidParams
+    pitch: PidParams
+    yaw: PidParams
+
+
+@dataclass
+class MotorSetpoints:
+    front_left: float
+    front_right: float
+    back_left: float
+    back_right: float
+
+
 class _PostcardDeserializer:
     # https://postcard.jamesmunns.com/wire-format.html
 
@@ -108,6 +131,19 @@ class _PostcardDeserializer:
     def pop_quat(self):
         return Quaternion(self.pop_f32(), self.pop_f32(), self.pop_f32(), self.pop_f32())
 
+    def pop_pid_params(self):
+        return PidParams(self.pop_f32(), self.pop_f32(), self.pop_f32())
+
+    def pop_controller_params(self):
+        return ControllerParams(
+            self.pop_pid_params(),
+            self.pop_pid_params(),
+            self.pop_pid_params(),
+            self.pop_pid_params())
+
+    def pop_motor_setpoints(self):
+        return MotorSetpoints(self.pop_f32(), self.pop_f32(), self.pop_f32(), self.pop_f32())
+
 
 class _PostcardSerializer:
     # https://postcard.jamesmunns.com/wire-format.html
@@ -131,6 +167,17 @@ class _PostcardSerializer:
                 self._bytes += current.to_bytes()
                 break
 
+    def push_pid_params(self, val):
+        self.push_f32(val.p)
+        self.push_f32(val.i)
+        self.push_f32(val.d)
+
+    def push_controller_params(self, val):
+        self.push_pid_params(val.linear)
+        self.push_pid_params(val.roll)
+        self.push_pid_params(val.pitch)
+        self.push_pid_params(val.yaw)
+
     def get_bytes(self):
         return self._bytes
 
@@ -146,12 +193,14 @@ class Telemetry:
         deser = _PostcardDeserializer(packed_bytes)
         self.timestamp = deser.pop_f32()  # seconds
         self.error_count = deser.pop_varint()
+        self.controller_params = deser.pop_controller_params()
         self.battery_voltage = deser.pop_f32()  # V
         self.accel = deser.pop_vec3()  # m/s^2
         self.gyro = deser.pop_vec3()  # rad/s
         self.mag = deser.pop_vec3()  # uT
         self.pressure = deser.pop_f32()  # Pa
         self.orientation = deser.pop_quat()
+        self.motor_setpoints = deser.pop_motor_setpoints()
 
 
 class Command:
@@ -167,4 +216,11 @@ class Command:
         ser = _PostcardSerializer()
         ser.push_varint(1)
         ser.push_bool(activate)
+        return ser.get_bytes()
+
+    @staticmethod
+    def update_controller_params(params):
+        ser = _PostcardSerializer()
+        ser.push_varint(2)
+        ser.push_controller_params(params)
         return ser.get_bytes()

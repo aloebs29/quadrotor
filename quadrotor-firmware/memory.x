@@ -8,6 +8,16 @@ MEMORY
   */
 
   /* These values correspond to the NRF52840 with Softdevices S140 7.3.0 */
-  FLASH : ORIGIN = 0x00027000, LENGTH = 868K
+  FLASH : ORIGIN = 0x00027000, LENGTH = 864K
+  USERDATA : ORIGIN = 0x000FF000, LENGTH = 4K
   RAM : ORIGIN = 0x20002ce0, LENGTH = 250656
+}
+
+SECTIONS
+{
+    .userdata (NOLOAD) : ALIGN(4)
+    {
+        *(.userdata .userdata.*);
+        . = ALIGN(4);
+    } > USERDATA
 }

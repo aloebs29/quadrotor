@@ -29,3 +29,5 @@ serde = { version = "1.0.*", default-features = false }
 embedded-cli = "0.2.1"
 embedded-io = "0.6.1"
 ufmt = "0.2.0"
+embedded-storage-async = "0.4"
+crc = "3.2"

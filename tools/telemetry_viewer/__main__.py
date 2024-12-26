@@ -12,7 +12,16 @@ from ahrs.filters import Madgwick
 import dearpygui.dearpygui as dpg
 import dearpygui_grid as dpg_grid
 
-from ..utils import Command, COMMAND_CHARACTERISTIC, get_ble_client, Telemetry, TELEMETRY_CHARACTERISTIC, Quaternion
+from ..utils import (
+    Command,
+    COMMAND_CHARACTERISTIC,
+    ControllerParams,
+    get_ble_client,
+    PidParams,
+    Telemetry,
+    TELEMETRY_CHARACTERISTIC,
+    Quaternion,
+)
 from .plot import TimeSeriesPlot
 from .rot_viz import RotationVisualizer
 
@@ -28,7 +37,7 @@ class _BleThread(Thread):
         self.command_queue = command_queue
 
     async def run_command(self):
-        def telemetry_cb(sender, data):
+        def telemetry_cb(_sender, data):
             self.telemetry_queue.put(Telemetry(data))
 
         async with get_ble_client() as ble_client:
@@ -48,6 +57,54 @@ class _BleThread(Thread):
         except BaseException as e:
             self.stop_event.set()
             raise e
+
+
+def set_field_from_path(obj, path, val):
+    field_name_then_nested_path = path.split(sep=".", maxsplit=1)
+    field_name = field_name_then_nested_path[0]
+
+    if len(field_name_then_nested_path) > 1:
+        # Need to recurse into nested object
+        nested_path = field_name_then_nested_path[1]
+        set_field_from_path(getattr(obj, field_name), nested_path, val)
+    else:
+        setattr(obj, field_name, val)
+
+
+def get_field_from_path(obj, path):
+    field_name_then_nested_path = path.split(sep=".", maxsplit=1)
+    field_name = field_name_then_nested_path[0]
+
+    if len(field_name_then_nested_path) > 1:
+        # Need to recurse into nested object
+        nested_path = field_name_then_nested_path[1]
+        return get_field_from_path(getattr(obj, field_name), nested_path)
+    else:
+        return getattr(obj, field_name)
+
+
+class InputsDataBinding:
+    def __init__(self, bound_obj):
+        self.binding = bound_obj
+        self.inputs = {}
+        self.dirty = False
+
+    def add_input(self, path, input_):
+        self.inputs[path] = input_
+
+        # Add callback function that sets the field in the bound object and sets the dirty flag
+        def callback(_sender, app_data):
+            self.dirty = True
+            set_field_from_path(self.binding, path, app_data)
+
+        dpg.set_item_callback(input_, callback)
+
+    def update_from_obj(self, obj_to_update_from):
+        for path, input_ in self.inputs.items():
+            new_val = get_field_from_path(obj_to_update_from, path)
+            # Update bound object and DPG input
+            set_field_from_path(self.binding, path, new_val)
+            dpg.set_value(input_, new_val)
 
 
 class Ui:
@@ -85,6 +142,13 @@ class Ui:
                     dpg.add_table_column()
                     dpg.add_table_column()
 
+                    # Status fields
+                    with dpg.table_row():
+                        self.error_count_label = dpg.add_text("Error count: ")
+                    with dpg.table_row():
+                        self.battery_level_label = dpg.add_text("Battery level: ")
+
+                    # Misc. commands
                     with dpg.table_row():
                         dpg.add_input_float(label="seconds", min_value=0.0, max_value=20.0,
                                             default_value=self.calibrate_accel_time,
@@ -93,10 +157,39 @@ class Ui:
                     with dpg.table_row():
                         dpg.add_button(label="Deactivate Controller", callback=self._deactivate_controller_button_cb)
                         dpg.add_button(label="Activate Controller", callback=self._activate_controller_button_cb)
+
+                    # Controller params inputs
+                    controller_params = ControllerParams(
+                        PidParams(0, 0, 0),
+                        PidParams(0, 0, 0),
+                        PidParams(0, 0, 0),
+                        PidParams(0, 0, 0),
+                    )
+                    self.controller_params_binding = InputsDataBinding(controller_params)
                     with dpg.table_row():
-                        self.error_count_label = dpg.add_text("Error count: ")
+                        dpg.add_text("Linear PID Params:")
                     with dpg.table_row():
-                        self.battery_level_label = dpg.add_text("Battery level: ")
+                        self.controller_params_binding.add_input("linear.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("linear.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("linear.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                    with dpg.table_row():
+                        dpg.add_text("Roll PID Params:")
+                    with dpg.table_row():
+                        self.controller_params_binding.add_input("roll.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("roll.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("roll.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                    with dpg.table_row():
+                        dpg.add_text("Pitch PID Params:")
+                    with dpg.table_row():
+                        self.controller_params_binding.add_input("pitch.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("pitch.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("pitch.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                    with dpg.table_row():
+                        dpg.add_text("Yaw PID Params:")
+                    with dpg.table_row():
+                        self.controller_params_binding.add_input("yaw.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("yaw.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("yaw.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
 
             # Rotation visualization window
             with dpg.window(label="Rotation Visualization", no_collapse=True, no_move=True, no_scrollbar=True,
@@ -129,16 +222,16 @@ class Ui:
             self.pressure_series = self.pressure_plot.add_series(None)
 
             # Arrange items in a grid
-            grid = dpg_grid.Grid(2, 4, window)
+            grid = dpg_grid.Grid(2, 5, window)
 
-            grid.push(status_window, 0, 0)
-            grid.push(self.rot_window, (0, 1), (0, 2))
-            grid.push(self.orientation_plot.plot, 0, 3)
+            grid.push(status_window, (0, 0), (0, 2))
+            grid.push(self.rot_window, (0, 3), (0, 4))
 
-            grid.push(self.accel_plot.plot, 1, 0)
-            grid.push(self.gyro_plot.plot, 1, 1)
-            grid.push(self.mag_plot.plot, 1, 2)
-            grid.push(self.pressure_plot.plot, 1, 3)
+            grid.push(self.orientation_plot.plot, 1, 0)
+            grid.push(self.accel_plot.plot, 1, 1)
+            grid.push(self.gyro_plot.plot, 1, 2)
+            grid.push(self.mag_plot.plot, 1, 3)
+            grid.push(self.pressure_plot.plot, 1, 4)
 
         # Finish setting up dear imgui
         dpg.create_viewport(title="Quadrotor Telemetry Viewer")
@@ -178,6 +271,12 @@ class Ui:
                 new_timestamp = t.timestamp
                 if timestamp_offset is None:
                     timestamp_offset = new_timestamp - time.time()
+
+                    # NOTE: This indicates the first received telemetry. Set controller params to reported values and
+                    # clear readonly flag.
+                    self.controller_params_binding.update_from_obj(t.controller_params)
+                    for input_ in self.controller_params_binding.inputs.values():
+                        dpg.configure_item(input_, readonly=False)
 
                 # Update status window
                 dpg.set_value(self.error_count_label, f"Error count: {t.error_count}")
@@ -241,6 +340,11 @@ class Ui:
 
             # Update rotation visualizer clip space
             self.rot_visualizer.update(dpg.get_item_width(self.rot_window), dpg.get_item_height(self.rot_window))
+
+            # Send controller tuning params if updated
+            if self.controller_params_binding.dirty:
+                self.command_queue.put(Command.update_controller_params(self.controller_params_binding.binding))
+                self.controller_params_binding.dirty = False
 
             dpg.render_dearpygui_frame()
 

@@ -98,11 +98,51 @@ impl From<Quatf> for Quaternion {
     }
 }
 
+#[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, Default, PartialEq)]
+pub struct PidParams {
+    pub p: f32,
+    pub i: f32,
+    pub d: f32,
+}
+
+#[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, Default, PartialEq)]
+pub struct ControllerParams {
+    pub linear: PidParams,
+    pub roll: PidParams,
+    pub pitch: PidParams,
+    pub yaw: PidParams,
+}
+
+#[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, Default, PartialEq)]
+pub struct PersistentDataFileContents {
+    pub controller_params: ControllerParams,
+}
+
+#[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]
+pub struct MotorSetpoints {
+    pub front_left: f32,
+    pub front_right: f32,
+    pub back_left: f32,
+    pub back_right: f32,
+}
+
+impl MotorSetpoints {
+    pub fn zeroed() -> Self {
+        MotorSetpoints {
+            front_left: 0f32,
+            front_right: 0f32,
+            back_left: 0f32,
+            back_right: 0f32,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]
 pub struct Telemetry {
     // Metadata
     pub timestamp: f32,
     pub error_count: u32,
+    pub controller_params: ControllerParams,
 
     // Sensor readings
     pub battery_voltage: f32,
@@ -111,11 +151,14 @@ pub struct Telemetry {
     pub mag: Vec3f,
     pub pressure: f32,
 
+    // Output
     pub orientation: Quatf,
+    pub motor_setpoints: MotorSetpoints,
 }
 
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]
 pub enum BleCommand {
     CalibrateAccel(f32),
     ActivateController(bool),
+    UpdateControllerParams(ControllerParams),
 }

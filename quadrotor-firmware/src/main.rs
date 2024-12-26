@@ -4,6 +4,7 @@
 use core::mem;
 
 use embassy_executor::Spawner;
+use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
@@ -29,11 +30,13 @@ use quadrotor_firmware::dps310;
 use quadrotor_firmware::fxas21002;
 use quadrotor_firmware::fxos8700;
 use quadrotor_firmware::motor;
+use quadrotor_firmware::persistent_data;
 use quadrotor_firmware::status_led;
 use quadrotor_firmware::usb_serial;
+use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
+use quadrotor_x::datatypes::{BleCommand, Telemetry, Vec3f};
 
-use quadrotor_x::datatypes::BleCommand;
-
+const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
 const MS_TO_SEC: f32 = 0.001;
 
@@ -120,15 +123,18 @@ async fn main(spawner: Spawner) {
     unwrap!(gyro_sensor.configure(&mut twim).await);
     let mut pressure_sensor = unsafe { dps310::DPS310_HANDLE.take() };
     unwrap!(pressure_sensor.configure(&mut twim).await);
-    let battery_reader = battery::BatteryReader::new(battery_adc);
+    let mut battery_reader = battery::BatteryReader::new(battery_adc);
 
     // Initialize motor outputs
-    let mut outputs = motor::MotorOutputs::new(
+    let mut motor_outputs = motor::MotorOutputs::new(
         p.PWM0,
         p.P0_07.into(),     // NRF52840 feather D6
         p.P0_26.into(),     // NRF52840 feather D9
         p.P0_27.into(),     // NRF52840 feather D10
         p.P0_06.into());    // NRF52840 feather D11
+
+    // Initialize persistent data service
+    let mut persistent_data_service = persistent_data::PersistentDataService::new(&sd).await;
 
     // Start tasks
     unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
@@ -137,17 +143,35 @@ async fn main(spawner: Spawner) {
     unwrap!(spawner.spawn(usb_serial::serial_task(serial_context)));
     unwrap!(spawner.spawn(ble_server::ble_task(sd, server)));
 
+    // NOTE: We don't want to start running the control loop with some default pressure measurement,
+    // because then our initial altitude will be way off. Wait until the pressure sensor returns a
+    // valid reading.
+    let initial_pressure_timeout =
+        Instant::now() + Duration::from_millis(INITIAL_PRESSURE_TIMEOUT_MS);
+    let mut pressure_msmt = loop {
+        if let Ok(Some(p)) = pressure_sensor.read(&mut twim).await {
+            break p;
+        }
+        if Instant::now() > initial_pressure_timeout {
+            panic!("Timed out while waiting for initial pressure sensor reading.");
+        }
+    };
+
     // Set up main control loop
     let mut next_iter_start = Instant::now();
-    let mut controller = unwrap!(controller::Controller::create_and_initialize(
-        &mut twim,
-        accel_and_mag_sensor,
-        gyro_sensor,
-        pressure_sensor,
-        battery_reader,
-        next_iter_start.as_millis() as f32 * MS_TO_SEC,
-        telemetry_signal,
-    ).await);
+    let mut timestamp = next_iter_start.as_millis() as f32 * MS_TO_SEC;
+    let mut error_count = 0u32;
+
+    let mut accel_msmt = Vec3f::zeroed();
+    let mut mag_msmt = Vec3f::zeroed();
+    let mut gyro_msmt = Vec3f::zeroed();
+
+    let mut accel_offset_state: Option<AccelOffsetState> = None;
+
+    let mut controller = controller::Controller::new(
+        persistent_data_service.get_contents().controller_params,
+        timestamp,
+    );
 
     loop {
         next_iter_start += Duration::from_millis(MAIN_LOOP_INTERVAL_MS);
@@ -158,8 +182,10 @@ async fn main(spawner: Spawner) {
         while let Ok(command) = ble_command_receiver.try_receive() {
             match command {
                 BleCommand::CalibrateAccel(duration_sec) => {
-                    controller.start_accel_calibration(
-                        (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize);
+                    let builder = AccelOffsetsBuilder::new(
+                        (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize,
+                    );
+                    accel_offset_state = Some(AccelOffsetState::InProgress(builder));
                 },
                 BleCommand::ActivateController(activate) => {
                     controller_state = if activate {
@@ -168,6 +194,12 @@ async fn main(spawner: Spawner) {
                         ControllerState::Inactive
                     };
                     controller_state_signal.signal(controller_state);
+                },
+                BleCommand::UpdateControllerParams(new_controller_params) => {
+                    persistent_data_service.update_contents(
+                        |persistent_data| persistent_data.controller_params = new_controller_params
+                    ).await;
+                    controller.params = new_controller_params;
                 }
             }
         }
@@ -190,29 +222,77 @@ async fn main(spawner: Spawner) {
                 Ok(())
             },
             UsbCommand::PwmSet { id, duty } => {
-                // TODO: This nesting is ugly
-                if let ControllerState::Inactive = controller_state {
-                    if id <= 3 {
-                        if duty >= 0.0 && duty <= 1.0 {
-                            let _ = uwrite!(cli_handle.writer(), "Setting output to {}%.", (duty * 100.0) as u32)?;
-                            outputs.set(id.into(), duty);
-                        } else {
-                            let _ = uwrite!(cli_handle.writer(), "Invalid duty cycle.")?;
-                        }
-                    } else {
-                        let _ = uwrite!(cli_handle.writer(), "Invalid PWM ID {}.", id)?;
-                    }
-                } else {
+                if let ControllerState::Active = controller_state {
                     let _ = uwrite!(cli_handle.writer(), "Controller is activated; manual PWM entry disallowed.");
+                } else if id > 3 {
+                    let _ = uwrite!(cli_handle.writer(), "Invalid PWM ID {}.", id)?;
+                } else if duty < 0.0 || duty > 1.0 {
+                    let _ = uwrite!(cli_handle.writer(), "Invalid duty cycle.")?;
+                } else {
+                    let _ = uwrite!(cli_handle.writer(), "Setting output to {}%.", (duty * 100.0) as u32)?;
+                    motor_outputs.set_single(id.into(), duty);
                 }
                 Ok(())
             },
         });
 
         // ==============
+        // Perform measurements
+        timestamp = Instant::now().as_millis() as f32 * MS_TO_SEC;
+
+        // NOTE: I2C transactions need to happen in a serial fashion, since they all use the same I2C bus. However, the
+        //       ADC read can happen in parallel with one of those I2C transactions.
+        let battery_fut = battery_reader.read();
+        let accel_and_mag_fut =
+            accel_and_mag_sensor.read(&mut twim, &mut accel_msmt, &mut mag_msmt);
+        let (battery_voltage, accel_and_mag_result) = join(battery_fut, accel_and_mag_fut).await;
+        if let Err(_) = accel_and_mag_result {
+            error_count += 1;
+        }
+
+        if let Err(_) = gyro_sensor.read(&mut twim, &mut gyro_msmt).await {
+            error_count += 1;
+        };
+
+        match pressure_sensor.read(&mut twim).await {
+            Ok(Some(p)) => pressure_msmt = p,
+            Ok(None) => (), // new measurement wasn't ready
+            Err(_) => error_count += 1,
+        }
+
+        // ==============
+        // Update and/or apply corrections
+        if let Some(ref inner_offset_state) = accel_offset_state {
+            match inner_offset_state {
+                AccelOffsetState::InProgress(builder) => {
+                    let new_inner_offset_state = builder.update(accel_msmt);
+                    accel_offset_state = Some(new_inner_offset_state);
+                }
+                AccelOffsetState::Ready(offsets) => {
+                    accel_msmt = offsets.apply(accel_msmt);
+                }
+            }
+        }
+
+        // ==============
         // Update controls
-        controller.update(&mut twim, Instant::now().as_millis() as f32 * MS_TO_SEC).await;
-        // TODO: If controller is active, use return vals from update to set motor outputs.
+        let motor_setpoints = controller.update(timestamp, &accel_msmt, &gyro_msmt, &mag_msmt).await;
+        if let ControllerState::Active = controller_state {
+            motor_outputs.set_all(motor_setpoints);
+        }
+
+        telemetry_signal.signal(Telemetry {
+            timestamp,
+            error_count,
+            controller_params: controller.params,
+            battery_voltage,
+            accel: accel_msmt.into(),
+            gyro: gyro_msmt.into(),
+            mag: mag_msmt.into(),
+            pressure: pressure_msmt,
+            orientation: controller.get_orientation(),
+            motor_setpoints,
+        });
     }
 }
 
