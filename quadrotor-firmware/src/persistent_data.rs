@@ -12,11 +12,15 @@ use crate::xerror::{XError, XResult};
 const FLASH_PAGE_SIZE: usize = 4096;
 
 #[repr(C, packed)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+#[derive(Copy, Clone, Debug)]
 struct PersistentDataFile {
     crc: u32,
     contents: [u8; PersistentDataFileContents::POSTCARD_MAX_SIZE],
 }
+// NOTE: The bytemuck derive macros fail for a u8 array above a certain size. These traits are safe
+// to implement since the PersistentDataFile uses a packed C repr composed of Pod/Zeroable types.
+unsafe impl Zeroable for PersistentDataFile {}
+unsafe impl Pod for PersistentDataFile {}
 
 #[link_section = ".userdata.PAGE"]
 static PERSISTENT_DATA_PAGE: MaybeUninit<[u8; FLASH_PAGE_SIZE]> = MaybeUninit::uninit();
@@ -75,7 +79,7 @@ impl PersistentDataService {
         let actual_crc = file.crc; // needed since struct field may be misaligned
         if actual_crc != expected_crc {
             warn!(
-                "Persistent data file CRC ({:04X}) did not match expected ({:04x})",
+                "Persistent data file CRC ({:04x}) did not match expected ({:04x})",
                 actual_crc, expected_crc
             );
             return Err(XError::CrcMismatch);

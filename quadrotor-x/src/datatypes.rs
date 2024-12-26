@@ -61,6 +61,12 @@ impl From<Vec3f> for F32x3 {
     }
 }
 
+impl Default for Vec3f {
+    fn default() -> Self {
+        Vec3f::zeroed()
+    }
+}
+
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]
 pub struct Quatf {
     pub w: f32,
@@ -116,6 +122,7 @@ pub struct ControllerParams {
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, Default, PartialEq)]
 pub struct PersistentDataFileContents {
     pub controller_params: ControllerParams,
+    pub accel_offsets: Vec3f,
 }
 
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]

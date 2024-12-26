@@ -3,11 +3,6 @@ use crate::sensor_fusion::G_TO_MPS2;
 
 const GRAVITY: Vec3f = Vec3f::new(0.0, 0.0, G_TO_MPS2);
 
-#[derive(Copy, Clone)]
-pub struct AccelOffsets {
-    inner: Vec3f,
-}
-
 /// Calculates accelerometer offsets based on the average measurement over a fixed number of samples.
 ///
 /// Expects the accelerometer to be upright and stationary for the duration of sampling.
@@ -20,13 +15,19 @@ pub struct AccelOffsetsBuilder {
 
 #[derive(Copy, Clone)]
 pub enum AccelOffsetState {
-    Ready(AccelOffsets),
+    Ready(Vec3f),
     InProgress(AccelOffsetsBuilder),
 }
 
-impl AccelOffsets {
-    pub fn apply(&self, raw_accel: Vec3f) -> Vec3f {
-        raw_accel - self.inner
+impl From<Vec3f> for AccelOffsetState {
+    fn from(value: Vec3f) -> Self {
+        AccelOffsetState::Ready(value)
+    }
+}
+
+impl Default for AccelOffsetState {
+    fn default() -> Self {
+        AccelOffsetState::from(Vec3f::zeroed())
     }
 }
 
@@ -44,9 +45,7 @@ impl AccelOffsetsBuilder {
         self.current_sample_count += 1;
 
         if self.current_sample_count == self.target_sample_count {
-            AccelOffsetState::Ready(AccelOffsets {
-                inner: self.accumulator - GRAVITY,
-            })
+            AccelOffsetState::Ready(self.accumulator - GRAVITY)
         } else {
             AccelOffsetState::InProgress(self)
         }

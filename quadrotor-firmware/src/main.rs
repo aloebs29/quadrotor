@@ -166,7 +166,7 @@ async fn main(spawner: Spawner) {
     let mut mag_msmt = Vec3f::zeroed();
     let mut gyro_msmt = Vec3f::zeroed();
 
-    let mut accel_offset_state: Option<AccelOffsetState> = None;
+    let mut accel_offset_state = AccelOffsetState::from(persistent_data_service.get_contents().accel_offsets);
 
     let mut controller = controller::Controller::new(
         persistent_data_service.get_contents().controller_params,
@@ -185,7 +185,7 @@ async fn main(spawner: Spawner) {
                     let builder = AccelOffsetsBuilder::new(
                         (duration_sec * (1000f32 / MAIN_LOOP_INTERVAL_MS as f32)) as usize,
                     );
-                    accel_offset_state = Some(AccelOffsetState::InProgress(builder));
+                    accel_offset_state = AccelOffsetState::InProgress(builder);
                 },
                 BleCommand::ActivateController(activate) => {
                     controller_state = if activate {
@@ -262,16 +262,17 @@ async fn main(spawner: Spawner) {
 
         // ==============
         // Update and/or apply corrections
-        if let Some(ref inner_offset_state) = accel_offset_state {
-            match inner_offset_state {
-                AccelOffsetState::InProgress(builder) => {
-                    let new_inner_offset_state = builder.update(accel_msmt);
-                    accel_offset_state = Some(new_inner_offset_state);
-                }
-                AccelOffsetState::Ready(offsets) => {
-                    accel_msmt = offsets.apply(accel_msmt);
-                }
+        if let AccelOffsetState::InProgress(builder) = accel_offset_state {
+            accel_offset_state = builder.update(accel_msmt);
+            // If the builder has finished, update our persistent data
+            if let AccelOffsetState::Ready(offsets) = accel_offset_state {
+                persistent_data_service.update_contents(
+                    |persistent_data| persistent_data.accel_offsets = offsets
+                ).await;
             }
+        }
+        if let AccelOffsetState::Ready(offsets) = accel_offset_state {
+            accel_msmt = accel_msmt - offsets;
         }
 
         // ==============
