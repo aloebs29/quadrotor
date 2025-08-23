@@ -16,8 +16,42 @@ a cargo workspace with the following members:
     on the host machine.
 * `quadrotor-firmware` Platform-specific code that depends on `quadrotor-x` and runs on the target platform (nRF52840).
 
-[Cargo make](https://github.com/sagiegurari/cargo-make) is used to build/test the code. Run
-`cargo make --list-all-steps` to see a list of all tasks and their descriptions.
+[Cargo make](https://github.com/sagiegurari/cargo-make) is used to build/test the code. Run `cargo make --list-all-steps` to see a list of all tasks and their descriptions.
+
+The firmware is written on top of the [Embassy](https://github.com/embassy-rs/embassy) framework which provides hardware abstraction and async primitives + constructions.
+
+### Async tasks
+
+![task relationships diagram](./assets/task_relationships.png)
+
+#### Main task
+
+The main task performs initialization of the device, spawns all other tasks, then executes the application's main loop. The main loop:
+* processes commands received from BLE and/or the USB CLI
+* collects new sensor inputs
+* estimates the device's orientation based on those sensor inputs
+* updates the controller based on the current inputs and orientation estimate
+* updates motor outputs based on the controller output
+
+#### Status LED task
+
+Blinks the LED based on a blink pattern which corresponds with the current controller state (i.e. enabled/disabled).
+
+#### BLE task
+
+Runs in a loop which waits for a connection from a peer, services that connection with the peer until it is disconnected, then waits for the next connection (and so on). While a connection is active, the task will notify the peer of updates to the device's telemetry (e.g. battery level, sensor inputs, orientation estimate, etc.), as well as wait for commands sent from the peer (e.g. target orientation and thrust, as well as initiating discrete operations such as calculating the accelerometer offset).
+
+#### Softdevice task
+
+The softdevice task is used to service the Nordic Softdevice (which performs much of the underlying interaction with the radio peripheral). The softdevice also sends a VBUS detect signal to the USB task.
+
+#### USB task
+
+Services the underlying USB peripheral interaction.
+
+#### Serial task
+
+Runs in a loop which waits for a connection from a peer, services that connection with the peer until it is disconnected, then waits for the next connection (and so on). While a connection is active, the task will push bytes received by the peer into a pipe for consumption by the main task (which runs a CLI parser) and pop bytes off of a pipe produced by the main task (e.g. CLI responses) and write them to the peer.
 
 ## Tools
 
