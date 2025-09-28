@@ -17,7 +17,7 @@ use crate::datatypes::UsbCommand;
 
 const USB_MAX_PACKET_SIZE: u8 = 8;
 const MAX_COMMAND_LEN: usize = 128;
-const MAX_RESPONSE_LEN: usize = 128;
+const MAX_RESPONSE_LEN: usize = 1024; // help text may be long
 const HISTORY_LEN: usize = 1024;
 
 pub type UsbDriver = Driver<'static, peripherals::USBD, &'static SoftwareVbusDetect>;
