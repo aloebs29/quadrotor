@@ -43,7 +43,7 @@ impl<T: pwm::Instance> MotorOutputs<'_, T> {
             motor_out_back_left,
             motor_out_back_right,
         );
-        pwm.set_prescaler(pwm::Prescaler::Div1);
+        pwm.set_prescaler(pwm::Prescaler::Div32);
         pwm.set_max_duty(MAX_DUTY as u16);
 
         let mut instance = Self { pwm };
