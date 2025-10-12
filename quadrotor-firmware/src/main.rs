@@ -34,7 +34,7 @@ use quadrotor_firmware::persistent_data;
 use quadrotor_firmware::status_led;
 use quadrotor_firmware::usb_serial;
 use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
-use quadrotor_x::datatypes::{BleCommand, Telemetry, Vec3f};
+use quadrotor_x::datatypes::{BleCommand, ControllerSetpoints, Telemetry, Vec3f};
 
 const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
@@ -167,9 +167,9 @@ async fn main(spawner: Spawner) {
     let mut gyro_msmt = Vec3f::zeroed();
 
     let mut accel_offset_state = AccelOffsetState::from(persistent_data_service.get_contents().accel_offsets);
-
     let mut controller = controller::Controller::new(
         persistent_data_service.get_contents().controller_params,
+        ControllerSetpoints::default(),
         timestamp,
     );
 
@@ -200,7 +200,10 @@ async fn main(spawner: Spawner) {
                         |persistent_data| persistent_data.controller_params = new_controller_params
                     ).await;
                     controller.params = new_controller_params;
-                }
+                },
+                BleCommand::UpdateControllerSetpoints(new_controller_setpoints) => {
+                    controller.setpoints = new_controller_setpoints;
+                },
             }
         }
 

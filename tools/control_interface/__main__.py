@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import ctypes
+import functools
 import math
 import pathlib
 import platform
@@ -22,6 +23,7 @@ from ..utils import (
     TELEMETRY_CHARACTERISTIC,
     Quaternion,
 )
+from.gamepad import GamepadInputHandler
 from .plot import TimeSeriesPlot
 from .rot_viz import RotationVisualizer
 
@@ -30,11 +32,12 @@ DEGREES_TO_RADIANS = 0.01745329
 
 
 class _BleThread(Thread):
-    def __init__(self, stop_event, telemetry_queue, command_queue, *args, **kwargs):
+    def __init__(self, stop_event, telemetry_queue, command_queue, setpoints_queue, *args, **kwargs):
         super(_BleThread, self).__init__(*args, **kwargs)
         self.stop_event = stop_event
         self.telemetry_queue = telemetry_queue
         self.command_queue = command_queue
+        self.setpoints_queue = setpoints_queue
 
     async def run_command(self):
         def telemetry_cb(_sender, data):
@@ -44,11 +47,41 @@ class _BleThread(Thread):
             await ble_client.start_notify(TELEMETRY_CHARACTERISTIC, telemetry_cb)
 
             while not self.stop_event.is_set():
+                pending_actions = []
+
+                # Get first pending command
                 try:
                     command = self.command_queue.get_nowait()
-                    await ble_client.write_gatt_char(COMMAND_CHARACTERISTIC, command, response=True)
+                    pending_actions.append(functools.partial(
+                        ble_client.write_gatt_char,
+                        COMMAND_CHARACTERISTIC,
+                        command,
+                        response=True
+                    ))
                 except Empty:
-                    await asyncio.sleep(0.1)
+                    pass
+
+                # Get latest pending setpoints
+                latest_setpoints = None
+                while True:
+                    try:
+                        latest_setpoints = self.setpoints_queue.get_nowait()
+                    except Empty:
+                        break
+                if latest_setpoints is not None:
+                    pending_actions.append(functools.partial(
+                        ble_client.write_gatt_char,
+                        COMMAND_CHARACTERISTIC,
+                        latest_setpoints,
+                        response=True
+                    ))
+
+                if len(pending_actions) == 0:
+                    await asyncio.sleep(0.001)
+                else:
+                    for pending_action in pending_actions:
+                        await pending_action()
+
             await ble_client.stop_notify(TELEMETRY_CHARACTERISTIC)
 
     def run(self):
@@ -108,11 +141,13 @@ class InputsDataBinding:
 
 
 class Ui:
-    def __init__(self, stop_event, telemetry_queue, command_queue, use_host_orientation):
+    def __init__(self, stop_event, telemetry_queue, command_queue, setpoints_queue, use_host_orientation):
         self.stop_event = stop_event
         self.telemetry_queue = telemetry_queue
         self.command_queue = command_queue
+        self.setpoints_queue = setpoints_queue
         self.use_host_orientation = use_host_orientation
+        self.gamepad_input = GamepadInputHandler()
 
         self.calibrate_accel_time = 5.0
 
@@ -234,7 +269,7 @@ class Ui:
             grid.push(self.pressure_plot.plot, 1, 4)
 
         # Finish setting up dear imgui
-        dpg.create_viewport(title="Quadrotor Telemetry Viewer")
+        dpg.create_viewport(title="Quadrotor Control Interface")
         dpg.setup_dearpygui()
         dpg.show_viewport()
         dpg.maximize_viewport()
@@ -346,6 +381,9 @@ class Ui:
                 self.command_queue.put(Command.update_controller_params(self.controller_params_binding.binding))
                 self.controller_params_binding.dirty = False
 
+            # Send controller setpoints based on gamepad input
+            self.gamepad_input.update(self.command_queue, self.setpoints_queue)
+
             dpg.render_dearpygui_frame()
 
         dpg.destroy_context()
@@ -362,11 +400,15 @@ if __name__ == "__main__":
     stop_event = Event()
     telemetry_queue = Queue()
     command_queue = Queue()
-    ble_thread = _BleThread(stop_event, telemetry_queue, command_queue)
+    # NOTE: Controller setpoints are queried from the gamepad much faster than they can be sent to the device, so they
+    #       live in their own queue which is exhausted on each BLE thread loop iteration, and only the most recent entry
+    #       is sent.
+    setpoints_queue = Queue()
+    ble_thread = _BleThread(stop_event, telemetry_queue, command_queue, setpoints_queue)
     ble_thread.start()
 
     try:
-        ui = Ui(stop_event, telemetry_queue, command_queue, args.use_host_orientation)
+        ui = Ui(stop_event, telemetry_queue, command_queue, setpoints_queue, args.use_host_orientation)
         ui.run()
     finally:
         stop_event.set()

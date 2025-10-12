@@ -98,6 +98,14 @@ class ControllerParams:
 
 
 @dataclass
+class ControllerSetpoints:
+    linear: float
+    roll: float
+    pitch: float
+    yaw: float
+
+
+@dataclass
 class MotorSetpoints:
     front_left: float
     front_right: float
@@ -178,6 +186,12 @@ class _PostcardSerializer:
         self.push_pid_params(val.pitch)
         self.push_pid_params(val.yaw)
 
+    def push_controller_setpoints(self, val):
+        self.push_f32(val.linear)
+        self.push_f32(val.roll)
+        self.push_f32(val.pitch)
+        self.push_f32(val.yaw)
+
     def get_bytes(self):
         return self._bytes
 
@@ -223,4 +237,11 @@ class Command:
         ser = _PostcardSerializer()
         ser.push_varint(2)
         ser.push_controller_params(params)
+        return ser.get_bytes()
+
+    @staticmethod
+    def update_controller_setpoints(setpoints):
+        ser = _PostcardSerializer()
+        ser.push_varint(3)
+        ser.push_controller_setpoints(setpoints)
         return ser.get_bytes()

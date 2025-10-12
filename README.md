@@ -86,15 +86,16 @@ the target device, use:
 pytest tools/hil_test/ --skip_flash
 ```
 
-### Telemetry viewer
+### Control interface
 
-A basic live-plotter for telemetry data from the target device can be run with:
+A basic control interface which accepts gamepad inputs to control the quadrotor and contains a live-plotter for
+telemetry data from the target device can be run with:
 
 ```
-python -m tools.telemetry_viewer
+python -m tools.control_interface
 ```
 
-The telemetry viewer requires that the device is connected via USB (to query the BLE address from the device) and is
+The control interface requires that the device is connected via USB (to query the BLE address from the device) and is
 connectable via BLE.
 
 TODO: Allow optional arg to bypass the BLE address query over USB and let the user choose from scanned devices.

@@ -125,6 +125,14 @@ pub struct PersistentDataFileContents {
     pub accel_offsets: Vec3f,
 }
 
+#[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, Default, PartialEq)]
+pub struct ControllerSetpoints {
+    pub linear: f32,
+    pub roll: f32,
+    pub pitch: f32,
+    pub yaw: f32,
+}
+
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, PartialEq)]
 pub struct MotorSetpoints {
     pub front_left: f32,
@@ -168,4 +176,5 @@ pub enum BleCommand {
     CalibrateAccel(f32),
     ActivateController(bool),
     UpdateControllerParams(ControllerParams),
+    UpdateControllerSetpoints(ControllerSetpoints),
 }

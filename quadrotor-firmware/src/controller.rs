@@ -1,16 +1,18 @@
-use quadrotor_x::datatypes::{ControllerParams, MotorSetpoints, Quatf, Vec3f};
+use quadrotor_x::datatypes::{ControllerParams, ControllerSetpoints, MotorSetpoints, Quatf, Vec3f};
 use quadrotor_x::sensor_fusion::madgwick_fusion_9;
 
 pub struct Controller {
     pub params: ControllerParams,
+    pub setpoints: ControllerSetpoints,
     orientation: Quatf,
     last_update: f32,
 }
 
 impl Controller {
-    pub fn new(params: ControllerParams, timestamp: f32) -> Self {
+    pub fn new(params: ControllerParams, setpoints: ControllerSetpoints, timestamp: f32) -> Self {
         Self {
             params,
+            setpoints,
             orientation: Quatf::default(),
             last_update: timestamp,
         }
