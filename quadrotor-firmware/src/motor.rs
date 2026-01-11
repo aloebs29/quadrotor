@@ -1,5 +1,8 @@
+use core::marker::PhantomData;
+
 use embassy_nrf::gpio;
 use embassy_nrf::pwm;
+use embassy_nrf::Peri;
 
 use quadrotor_x::datatypes::MotorSetpoints;
 
@@ -25,16 +28,17 @@ impl From<u8> for Motor {
 }
 
 pub struct MotorOutputs<'a, T: pwm::Instance> {
-    pwm: pwm::SimplePwm<'a, T>,
+    pwm: pwm::SimplePwm<'a>,
+    phantom: PhantomData<T>,
 }
 
-impl<T: pwm::Instance> MotorOutputs<'_, T> {
+impl<'a, T: pwm::Instance> MotorOutputs<'a, T> {
     pub fn new(
-        pwm_peripheral: T,
-        motor_out_front_left: gpio::AnyPin,
-        motor_out_front_right: gpio::AnyPin,
-        motor_out_back_left: gpio::AnyPin,
-        motor_out_back_right: gpio::AnyPin,
+        pwm_peripheral: Peri<'a, T>,
+        motor_out_front_left: Peri<'a, gpio::AnyPin>,
+        motor_out_front_right: Peri<'a, gpio::AnyPin>,
+        motor_out_back_left: Peri<'a, gpio::AnyPin>,
+        motor_out_back_right: Peri<'a, gpio::AnyPin>,
     ) -> Self {
         let pwm = pwm::SimplePwm::new_4ch(
             pwm_peripheral,
@@ -42,11 +46,12 @@ impl<T: pwm::Instance> MotorOutputs<'_, T> {
             motor_out_front_right,
             motor_out_back_left,
             motor_out_back_right,
+            &Default::default()
         );
         pwm.set_prescaler(pwm::Prescaler::Div32);
         pwm.set_max_duty(MAX_DUTY as u16);
 
-        let mut instance = Self { pwm };
+        let mut instance = Self { pwm, phantom: PhantomData };
         instance.set_all(MotorSetpoints::zeroed());
 
         instance
@@ -56,7 +61,7 @@ impl<T: pwm::Instance> MotorOutputs<'_, T> {
         // TODO: Linearize output_ratio to thrust; correct for battery voltage drop?
         // PWM duty is inverted (for an active-high signal)
         let output_ratio = output_ratio.clamp(0.0, 1.0);
-        let duty = (MAX_DUTY - (output_ratio * MAX_DUTY)) as u16;
+        let duty = pwm::DutyCycle::inverted((output_ratio * MAX_DUTY) as u16);
 
         self.pwm.set_duty(motor as usize, duty);
     }

@@ -3,7 +3,7 @@ use core::mem::replace;
 use bitfield_struct::bitfield;
 use bytemuck::{Pod, Zeroable};
 use defmt::error;
-use embassy_nrf::twim::{Instance, Twim};
+use embassy_nrf::twim::Twim;
 use embassy_time::{Duration, Instant};
 
 use crate::xerror::*;
@@ -114,7 +114,7 @@ pub struct Dps310 {
 }
 
 impl Dps310 {
-    pub async fn configure<'a, T: Instance>(&mut self, twim: &mut Twim<'a, T>) -> XResult<()> {
+    pub async fn configure<'a>(&mut self, twim: &mut Twim<'a>) -> XResult<()> {
         // TODO: Allow configuration of sample rate and measurement range
 
         // Check device ID
@@ -229,7 +229,7 @@ impl Dps310 {
         Ok(())
     }
 
-    pub async fn read<'a, T: Instance>(&self, twim: &mut Twim<'a, T>) -> XResult<Option<f32>> {
+    pub async fn read<'a>(&self, twim: &mut Twim<'a>) -> XResult<Option<f32>> {
         // Panic if this is called without coefficients loaded (indicating init function was not called or did not succeed).
         let coefficients = self.coefficients.as_ref().unwrap();
 
@@ -273,7 +273,7 @@ impl Dps310 {
         Ok(Some(pcomp))
     }
 
-    async fn read_meas_cfg<'a, T: Instance>(&self, twim: &mut Twim<'a, T>) -> XResult<RegMeasCfg> {
+    async fn read_meas_cfg<'a>(&self, twim: &mut Twim<'a>) -> XResult<RegMeasCfg> {
         let mut measurement_config_val = [0u8; 1];
         twim.write_read(
             DEVICE_ADDRESS,

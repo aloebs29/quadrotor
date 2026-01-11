@@ -8,16 +8,10 @@ members = [
 ]
 
 [patch.crates-io]
-embassy-executor = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
-embassy-futures = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
-embassy-nrf = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
-embassy-sync = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
-embassy-time = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
-embassy-usb = { git = "https://github.com/embassy-rs/embassy", rev = "5e9297313641f1a2b4a868e1fe625543da8fc40a" }
-nrf-softdevice = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "cdee83c0753a0a3c912a67a5bc2e0b46d50aa5ca" }
-nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "cdee83c0753a0a3c912a67a5bc2e0b46d50aa5ca" }
+nrf-softdevice = { git = "https://github.com/embassy-rs/nrf-softdevice" }
+nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice" }
 
-embedded-cli = { git = "https://github.com/aloebs29/embedded-cli-rs", rev = "7a5399db98379794e6a1700397a571a08afbc9de" }
+embedded-cli = { git = "https://github.com/aloebs29/embedded-cli-rs" }
 
 [profile.release]
 debug = 2

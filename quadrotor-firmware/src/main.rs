@@ -1,14 +1,11 @@
 #![no_main]
 #![no_std]
 
-use core::mem;
-
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
 
 use embassy_nrf::gpio::{Level, Output, OutputDrive};
-use embassy_nrf::pac;
 use embassy_nrf::saadc;
 use embassy_nrf::twim::{self, Twim};
 use embassy_nrf::usb;
@@ -16,7 +13,7 @@ use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::{bind_interrupts, interrupt, peripherals};
 use embassy_nrf::interrupt::InterruptExt;
 
-use nrf_softdevice::{SocEvent, Softdevice};
+use nrf_softdevice::{raw, RawError, SocEvent, Softdevice};
 
 use defmt::{info, unwrap};
 use static_cell::StaticCell;
@@ -41,7 +38,7 @@ const MAIN_LOOP_INTERVAL_MS: u64 = 10;
 const MS_TO_SEC: f32 = 0.001;
 
 bind_interrupts!(struct I2cIrqs {
-    SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0 => twim::InterruptHandler<peripherals::TWISPI0>;
+    TWISPI0 => twim::InterruptHandler<peripherals::TWISPI0>;
 });
 
 bind_interrupts!(struct SaadcIrqs {
@@ -62,10 +59,6 @@ async fn main(spawner: Spawner) {
     config.time_interrupt_priority = interrupt::Priority::P2;
 
     let p = embassy_nrf::init(config);
-    let clock: pac::CLOCK = unsafe { mem::transmute(()) };
-
-    clock.tasks_hfclkstart.write(|w| unsafe { w.bits(1) });
-    while clock.events_hfclkstarted.read().bits() != 1 {}
 
     // NOTE: The softdevice uses the POWER_CLOCK interrupt internally, which would otherwise be used for a hardware
     //       VBUS detect in the USB driver. To work around this, a software VBUS detect is used based on SoC events
@@ -75,6 +68,7 @@ async fn main(spawner: Spawner) {
 
     // Initialize soft device with settings from BLE module
     let sd = Softdevice::enable(&ble_server::get_softdevice_config());
+    unwrap!(RawError::convert(unsafe { raw::sd_clock_hfclk_request() }));
 
     // Setup shared data between tasks
     static TELEMETRY_SIGNAL: StaticCell<TelemetrySignal> = StaticCell::new();
@@ -113,8 +107,9 @@ async fn main(spawner: Spawner) {
     // Initialize I2C
     let mut i2c_config = twim::Config::default();
     i2c_config.frequency = twim::Frequency::K400;
-    interrupt::SPIM0_SPIS0_TWIM0_TWIS0_SPI0_TWI0.set_priority(interrupt::Priority::P2);
-    let mut twim = Twim::new(p.TWISPI0, I2cIrqs, p.P0_12, p.P0_11, i2c_config);
+    interrupt::TWISPI0.set_priority(interrupt::Priority::P2);
+    static RAM_BUFFER: StaticCell<[u8; 2]> = StaticCell::new();
+    let mut twim = Twim::new(p.TWISPI0, I2cIrqs, p.P0_12, p.P0_11, i2c_config, RAM_BUFFER.init([0; 2]));
 
     // Initialize sensors
     let mut accel_and_mag_sensor = unsafe { fxos8700::FXOS8700_HANDLE.take() };

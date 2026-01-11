@@ -1,7 +1,6 @@
 use embassy_futures::select::{select, Either};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
-use embassy_nrf::peripherals;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::pipe;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
@@ -20,7 +19,7 @@ const MAX_COMMAND_LEN: usize = 128;
 const MAX_RESPONSE_LEN: usize = 1024; // help text may be long
 const HISTORY_LEN: usize = 1024;
 
-pub type UsbDriver = Driver<'static, peripherals::USBD, &'static SoftwareVbusDetect>;
+pub type UsbDriver = Driver<'static, &'static SoftwareVbusDetect>;
 
 type UsbResult<T> = Result<T, EndpointError>;
 
@@ -154,19 +153,17 @@ pub fn init(
     let state = STATE.init(State::new());
 
     // Create embassy-usb DeviceBuilder using the driver and config.
-    static DEVICE_DESC: StaticCell<[u8; 256]> = StaticCell::new();
     static CONFIG_DESC: StaticCell<[u8; 256]> = StaticCell::new();
     static BOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
-    static MSOS_DESC: StaticCell<[u8; 128]> = StaticCell::new();
-    static CONTROL_BUF: StaticCell<[u8; 128]> = StaticCell::new();
+    static MSOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
+    static CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
     let mut builder = Builder::new(
         driver,
         config,
-        &mut DEVICE_DESC.init_with(|| [0; 256])[..],
         &mut CONFIG_DESC.init_with(|| [0; 256])[..],
         &mut BOS_DESC.init_with(|| [0; 256])[..],
-        &mut MSOS_DESC.init_with(|| [0; 128])[..],
-        &mut CONTROL_BUF.init_with(|| [0; 128])[..],
+        &mut MSOS_DESC.init_with(|| [0; 256])[..],
+        &mut CONTROL_BUF.init_with(|| [0; 64])[..],
     );
 
     // Create classes on the builder.

@@ -3,7 +3,7 @@ use core::mem::replace;
 use bitfield_struct::bitfield;
 use bytemuck::{Pod, Zeroable};
 use defmt::{debug, error};
-use embassy_nrf::twim::{Instance, Twim};
+use embassy_nrf::twim::Twim;
 
 use quadrotor_x::datatypes::Vec3f;
 
@@ -103,7 +103,7 @@ pub struct Fxos8700 {
 }
 
 impl Fxos8700 {
-    pub async fn configure<'a, T: Instance>(&mut self, twim: &mut Twim<'a, T>) -> XResult<()> {
+    pub async fn configure<'a>(&mut self, twim: &mut Twim<'a>) -> XResult<()> {
         // TODO: Allow configuration of sample rate and measurement range
 
         // Check device ID
@@ -153,9 +153,9 @@ impl Fxos8700 {
         Ok(())
     }
 
-    pub async fn read<'a, T: Instance>(
+    pub async fn read<'a>(
         &mut self,
-        twim: &mut Twim<'a, T>,
+        twim: &mut Twim<'a>,
         accel_out: &mut Vec3f,
         mag_out: &mut Vec3f,
     ) -> XResult<()> {
