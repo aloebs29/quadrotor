@@ -87,11 +87,12 @@ class PidParams:
     p: float
     i: float
     d: float
+    integral_max: float
 
 
 @dataclass
 class ControllerParams:
-    linear: PidParams
+    thrust: PidParams
     roll: PidParams
     pitch: PidParams
     yaw: PidParams
@@ -99,7 +100,7 @@ class ControllerParams:
 
 @dataclass
 class ControllerSetpoints:
-    linear: float
+    thrust: float
     roll: float
     pitch: float
     yaw: float
@@ -140,7 +141,7 @@ class _PostcardDeserializer:
         return Quaternion(self.pop_f32(), self.pop_f32(), self.pop_f32(), self.pop_f32())
 
     def pop_pid_params(self):
-        return PidParams(self.pop_f32(), self.pop_f32(), self.pop_f32())
+        return PidParams(self.pop_f32(), self.pop_f32(), self.pop_f32(), self.pop_f32())
 
     def pop_controller_params(self):
         return ControllerParams(
@@ -179,15 +180,16 @@ class _PostcardSerializer:
         self.push_f32(val.p)
         self.push_f32(val.i)
         self.push_f32(val.d)
+        self.push_f32(val.integral_max)
 
     def push_controller_params(self, val):
-        self.push_pid_params(val.linear)
+        self.push_pid_params(val.thrust)
         self.push_pid_params(val.roll)
         self.push_pid_params(val.pitch)
         self.push_pid_params(val.yaw)
 
     def push_controller_setpoints(self, val):
-        self.push_f32(val.linear)
+        self.push_f32(val.thrust)
         self.push_f32(val.roll)
         self.push_f32(val.pitch)
         self.push_f32(val.yaw)

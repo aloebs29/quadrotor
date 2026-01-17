@@ -30,4 +30,24 @@ pub enum ControllerState {
     Inactive,
     Active,
 }
+
+impl From<bool> for ControllerState {
+    fn from(value: bool) -> Self {
+        if value {
+            ControllerState::Active
+        } else {
+            ControllerState::Inactive
+        }
+    }
+}
+
+impl From<ControllerState> for bool {
+    fn from(value: ControllerState) -> Self {
+        match value {
+            ControllerState::Active => true,
+            ControllerState::Inactive => false,
+        }
+    }
+}
+
 pub type ControllerStateSignal = Signal<NoopRawMutex, ControllerState>;

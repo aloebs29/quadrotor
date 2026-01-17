@@ -31,7 +31,8 @@ use quadrotor_firmware::persistent_data;
 use quadrotor_firmware::status_led;
 use quadrotor_firmware::usb_serial;
 use quadrotor_x::accel::{AccelOffsetState, AccelOffsetsBuilder};
-use quadrotor_x::datatypes::{BleCommand, ControllerSetpoints, Telemetry, Vec3f};
+use quadrotor_x::datatypes::{BleCommand, ControllerSetpoints, MotorSetpoints, Quatf, Telemetry, Vec3f};
+use quadrotor_x::sensor_fusion::madgwick_fusion_6;
 
 const INITIAL_PRESSURE_TIMEOUT_MS: u64 = 2000;
 const MAIN_LOOP_INTERVAL_MS: u64 = 10;
@@ -161,12 +162,10 @@ async fn main(spawner: Spawner) {
     let mut mag_msmt = Vec3f::zeroed();
     let mut gyro_msmt = Vec3f::zeroed();
 
+    let mut orientation = Quatf::default();
     let mut accel_offset_state = AccelOffsetState::from(persistent_data_service.get_contents().accel_offsets);
-    let mut controller = controller::Controller::new(
-        persistent_data_service.get_contents().controller_params,
-        ControllerSetpoints::default(),
-        timestamp,
-    );
+    let mut controller_setpoints = ControllerSetpoints::default();
+    let mut controller = controller::Controller::new(persistent_data_service.get_contents().controller_params);
 
     loop {
         next_iter_start += Duration::from_millis(MAIN_LOOP_INTERVAL_MS);
@@ -183,12 +182,13 @@ async fn main(spawner: Spawner) {
                     accel_offset_state = AccelOffsetState::InProgress(builder);
                 },
                 BleCommand::ActivateController(activate) => {
-                    controller_state = if activate {
-                        ControllerState::Active
-                    } else {
-                        ControllerState::Inactive
-                    };
-                    controller_state_signal.signal(controller_state);
+                    if activate != controller_state.into() {
+                        if activate {
+                            controller.reset(); // reset on rising edge
+                        }
+                        controller_state = activate.into();
+                        controller_state_signal.signal(controller_state);
+                    }
                 },
                 BleCommand::UpdateControllerParams(new_controller_params) => {
                     persistent_data_service.update_contents(
@@ -197,7 +197,7 @@ async fn main(spawner: Spawner) {
                     controller.params = new_controller_params;
                 },
                 BleCommand::UpdateControllerSetpoints(new_controller_setpoints) => {
-                    controller.setpoints = new_controller_setpoints;
+                    controller_setpoints = new_controller_setpoints;
                 },
             }
         }
@@ -236,8 +236,6 @@ async fn main(spawner: Spawner) {
 
         // ==============
         // Perform measurements
-        timestamp = Instant::now().as_millis() as f32 * MS_TO_SEC;
-
         // NOTE: I2C transactions need to happen in a serial fashion, since they all use the same I2C bus. However, the
         //       ADC read can happen in parallel with one of those I2C transactions.
         let battery_fut = battery_reader.read();
@@ -275,21 +273,27 @@ async fn main(spawner: Spawner) {
 
         // ==============
         // Update controls
-        let motor_setpoints = controller.update(timestamp, &accel_msmt, &gyro_msmt, &mag_msmt).await;
+        let new_timestamp = Instant::now().as_millis() as f32 * MS_TO_SEC;
+        let delta_t = new_timestamp - timestamp;
+        timestamp = new_timestamp;
+        orientation = madgwick_fusion_6(orientation, accel_msmt, gyro_msmt, delta_t);
+
+        let mut motor_setpoints = MotorSetpoints::zeroed();
         if let ControllerState::Active = controller_state {
-            motor_outputs.set_all(motor_setpoints);
+            motor_setpoints = controller.update(&accel_msmt, &orientation, &controller_setpoints, delta_t);
         }
+        motor_outputs.set_all(motor_setpoints);
 
         telemetry_signal.signal(Telemetry {
             timestamp,
             error_count,
             controller_params: controller.params,
             battery_voltage,
-            accel: accel_msmt.into(),
-            gyro: gyro_msmt.into(),
-            mag: mag_msmt.into(),
+            accel: accel_msmt,
+            gyro: gyro_msmt,
+            mag: mag_msmt,
             pressure: pressure_msmt,
-            orientation: controller.get_orientation(),
+            orientation,
             motor_setpoints,
         });
     }

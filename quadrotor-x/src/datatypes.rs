@@ -79,6 +79,19 @@ impl Quatf {
     pub fn new(w: f32, x: f32, y: f32, z: f32) -> Self {
         Self { w, x, y, z }
     }
+
+    pub fn as_euler_angles(self: &Self) -> Vec3f {
+        let quat = Quaternion::from(*self);
+        let eulers: F32x3 = quat.to_euler().into();
+        eulers.into()
+    }
+
+    pub fn rotate_vector(self: &Self, vec: &Vec3f) -> Vec3f {
+        let quat = Quaternion::from(*self);
+        let vec = F32x3::from(*vec);
+        let rotated = quat.rotate(vec);
+        rotated.into()
+    }
 }
 
 impl Default for Quatf {
@@ -109,11 +122,12 @@ pub struct PidParams {
     pub p: f32,
     pub i: f32,
     pub d: f32,
+    pub integral_max: f32,
 }
 
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, Default, PartialEq)]
 pub struct ControllerParams {
-    pub linear: PidParams,
+    pub thrust: PidParams,
     pub roll: PidParams,
     pub pitch: PidParams,
     pub yaw: PidParams,
@@ -127,7 +141,7 @@ pub struct PersistentDataFileContents {
 
 #[derive(Serialize, Deserialize, MaxSize, Copy, Clone, Debug, Default, PartialEq)]
 pub struct ControllerSetpoints {
-    pub linear: f32,
+    pub thrust: f32,
     pub roll: f32,
     pub pitch: f32,
     pub yaw: f32,

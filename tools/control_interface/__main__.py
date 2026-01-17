@@ -12,6 +12,7 @@ import time
 from ahrs.filters import Madgwick
 import dearpygui.dearpygui as dpg
 import dearpygui_grid as dpg_grid
+import numpy as np
 
 from ..utils import (
     Command,
@@ -202,29 +203,33 @@ class Ui:
                     )
                     self.controller_params_binding = InputsDataBinding(controller_params)
                     with dpg.table_row():
-                        dpg.add_text("Linear PID Params:")
+                        dpg.add_text("Thrust PID Params:")
                     with dpg.table_row():
-                        self.controller_params_binding.add_input("linear.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
-                        self.controller_params_binding.add_input("linear.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
-                        self.controller_params_binding.add_input("linear.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("thrust.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("thrust.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("thrust.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("thrust.integral_max", dpg.add_input_float(label="(I max)", step=0.1, readonly=True))
                     with dpg.table_row():
                         dpg.add_text("Roll PID Params:")
                     with dpg.table_row():
                         self.controller_params_binding.add_input("roll.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
                         self.controller_params_binding.add_input("roll.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
                         self.controller_params_binding.add_input("roll.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("roll.integral_max", dpg.add_input_float(label="(I max)", step=0.1, readonly=True))
                     with dpg.table_row():
                         dpg.add_text("Pitch PID Params:")
                     with dpg.table_row():
                         self.controller_params_binding.add_input("pitch.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
                         self.controller_params_binding.add_input("pitch.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
                         self.controller_params_binding.add_input("pitch.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("pitch.integral_max", dpg.add_input_float(label="(I max)", step=0.1, readonly=True))
                     with dpg.table_row():
                         dpg.add_text("Yaw PID Params:")
                     with dpg.table_row():
                         self.controller_params_binding.add_input("yaw.p", dpg.add_input_float(label="(P)", step=0.1, readonly=True))
                         self.controller_params_binding.add_input("yaw.i", dpg.add_input_float(label="(I)", step=0.1, readonly=True))
                         self.controller_params_binding.add_input("yaw.d", dpg.add_input_float(label="(D)", step=0.1, readonly=True))
+                        self.controller_params_binding.add_input("yaw.integral_max", dpg.add_input_float(label="(I max)", step=0.1, readonly=True))
 
             # Rotation visualization window
             with dpg.window(label="Rotation Visualization", no_collapse=True, no_move=True, no_scrollbar=True,
@@ -252,6 +257,7 @@ class Ui:
             self.mag_x_series = self.mag_plot.add_series("X")
             self.mag_y_series = self.mag_plot.add_series("Y")
             self.mag_z_series = self.mag_plot.add_series("Z")
+            self.mag_magn_series = self.mag_plot.add_series("Magn")
 
             self.pressure_plot = TimeSeriesPlot("Pressure Sensor Data", "Pressure (kPa)")
             self.pressure_series = self.pressure_plot.add_series(None)
@@ -356,6 +362,7 @@ class Ui:
                 self.mag_x_series.append_data(new_timestamp, t.mag.x)
                 self.mag_y_series.append_data(new_timestamp, t.mag.y)
                 self.mag_z_series.append_data(new_timestamp, t.mag.z)
+                self.mag_magn_series.append_data(new_timestamp, np.linalg.norm(t.mag.as_array()))
 
                 self.pressure_series.append_data(new_timestamp, t.pressure)
 

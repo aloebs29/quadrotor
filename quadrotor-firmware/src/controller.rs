@@ -1,40 +1,131 @@
-use quadrotor_x::datatypes::{ControllerParams, ControllerSetpoints, MotorSetpoints, Quatf, Vec3f};
-use quadrotor_x::sensor_fusion::madgwick_fusion_9;
+use quadrotor_x::datatypes::{ControllerParams, ControllerSetpoints, MotorSetpoints, PidParams, Quatf, Vec3f};
+use quadrotor_x::sensor_fusion::G_TO_MPS2;
 
-pub struct Controller {
-    pub params: ControllerParams,
-    pub setpoints: ControllerSetpoints,
-    orientation: Quatf,
-    last_update: f32,
+fn truncate_pos_or_neg(value: f32, abs_max: f32) -> f32 {
+    if value > abs_max {
+        abs_max
+    } else if value < -abs_max {
+        -abs_max
+    } else {
+        value
+    }
 }
 
-impl Controller {
-    pub fn new(params: ControllerParams, setpoints: ControllerSetpoints, timestamp: f32) -> Self {
+struct Pid {
+    integral: f32,
+}
+
+impl Pid {
+    pub fn new() -> Self {
         Self {
-            params,
-            setpoints,
-            orientation: Quatf::default(),
-            last_update: timestamp,
+            integral: 0f32,
         }
     }
 
-    pub async fn update(
-        self: &mut Self,
-        timestamp: f32,
-        accel: &Vec3f,
-        gyro: &Vec3f,
-        mag: &Vec3f,
-    ) -> MotorSetpoints {
-        let delta_t = timestamp - self.last_update;
-        self.last_update = timestamp;
-
-        self.orientation = madgwick_fusion_9(self.orientation, *accel, *gyro, *mag, delta_t);
-
-        // TODO: Implement controller logic
-        MotorSetpoints::zeroed()
+    pub fn clear_integral(&mut self) {
+        self.integral = 0.0;
     }
 
-    pub fn get_orientation(self: &Self) -> Quatf {
-        self.orientation
+    pub fn get_output(&mut self, params: PidParams, setpoint: f32, delta_t: f32, current_val: f32, last_val: f32) -> f32 {
+        let error = setpoint - current_val;
+
+        self.integral = self.integral + (params.i * error * delta_t);
+        self.integral = truncate_pos_or_neg(self.integral, params.integral_max);
+
+        let output = params.p * error +
+            self.integral -
+            params.d * (current_val - last_val) / delta_t;
+
+        output
+    }
+}
+
+pub struct Controller {
+    pub params: ControllerParams,
+    last_thrust: Option<f32>,
+    last_orientation: Option<Quatf>,
+    thrust_pid: Pid,
+    roll_pid: Pid,
+    pitch_pid: Pid,
+    yaw_pid: Pid,
+}
+
+impl Controller {
+    pub fn new(params: ControllerParams) -> Self {
+        Self {
+            params,
+            last_thrust: None,
+            last_orientation: None,
+            thrust_pid: Pid::new(),
+            roll_pid: Pid::new(),
+            pitch_pid: Pid::new(),
+            yaw_pid: Pid::new(),
+        }
+    }
+
+    pub fn reset(self: &mut Self) {
+        self.last_orientation = None;
+        self.thrust_pid.clear_integral();
+        self.roll_pid.clear_integral();
+        self.pitch_pid.clear_integral();
+        self.yaw_pid.clear_integral();
+    }
+
+    pub fn update(
+        self: &mut Self,
+        accel: &Vec3f,
+        orientation: &Quatf,
+        setpoints: &ControllerSetpoints,
+        delta_t: f32,
+    ) -> MotorSetpoints {
+        // Figure out upward acceleration (in the quadrotor's frame)
+        let gravity_in_crafts_frame = orientation.rotate_vector(&Vec3f::new(0., 0., G_TO_MPS2));
+        let corrected_accel = *accel - gravity_in_crafts_frame;
+        let thrust = corrected_accel.z;
+
+        // Retrieve & update "last" values (used for calculating PID derivative term).
+        let last_thrust = self.last_thrust.unwrap_or_else(|| thrust);
+        let eulers = orientation.as_euler_angles();
+        let last_eulers = match self.last_orientation {
+            Some(value) => value.as_euler_angles(),
+            None => eulers,
+        };
+
+        // Update PIDs
+        let thrust_output = self.thrust_pid.get_output(
+            self.params.thrust,
+            setpoints.thrust,
+            delta_t,
+            thrust,
+            last_thrust,
+        );
+        let roll_output = self.roll_pid.get_output(
+            self.params.roll,
+            setpoints.roll,
+            delta_t,
+            eulers.x,
+            last_eulers.x,
+        );
+        let pitch_output = self.pitch_pid.get_output(
+            self.params.pitch,
+            setpoints.pitch,
+            delta_t,
+            eulers.y,
+            last_eulers.y,
+        );
+        let yaw_output = self.yaw_pid.get_output(
+            self.params.yaw,
+            setpoints.yaw,
+            delta_t,
+            eulers.z,
+            last_eulers.z,
+        );
+
+        MotorSetpoints {
+            front_left: thrust_output + roll_output + pitch_output + yaw_output,
+            front_right: thrust_output - roll_output + pitch_output - yaw_output,
+            back_left: thrust_output + roll_output - pitch_output - yaw_output,
+            back_right: thrust_output - roll_output - pitch_output + yaw_output,
+        }
     }
 }
