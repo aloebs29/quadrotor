@@ -177,6 +177,7 @@ class Ui:
                     dpg.add_table_column()
                     dpg.add_table_column()
                     dpg.add_table_column()
+                    dpg.add_table_column()
 
                     # Status fields
                     with dpg.table_row():
@@ -196,10 +197,10 @@ class Ui:
 
                     # Controller params inputs
                     controller_params = ControllerParams(
-                        PidParams(0, 0, 0),
-                        PidParams(0, 0, 0),
-                        PidParams(0, 0, 0),
-                        PidParams(0, 0, 0),
+                        PidParams(0, 0, 0, 0),
+                        PidParams(0, 0, 0, 0),
+                        PidParams(0, 0, 0, 0),
+                        PidParams(0, 0, 0, 0),
                     )
                     self.controller_params_binding = InputsDataBinding(controller_params)
                     with dpg.table_row():
@@ -262,10 +263,17 @@ class Ui:
             self.pressure_plot = TimeSeriesPlot("Pressure Sensor Data", "Pressure (kPa)")
             self.pressure_series = self.pressure_plot.add_series(None)
 
+            self.motor_setpoints_plot = TimeSeriesPlot("Motor Setpoints", "Output %", (0, 100))
+            self.motor_setpoint_front_left = self.motor_setpoints_plot.add_series("FL")
+            self.motor_setpoint_front_right = self.motor_setpoints_plot.add_series("FR")
+            self.motor_setpoint_back_left = self.motor_setpoints_plot.add_series("BL")
+            self.motor_setpoint_back_right = self.motor_setpoints_plot.add_series("BR")
+
             # Arrange items in a grid
             grid = dpg_grid.Grid(2, 5, window)
 
-            grid.push(status_window, (0, 0), (0, 2))
+            grid.push(status_window, (0, 0), (0, 1))
+            grid.push(self.motor_setpoints_plot.plot, 0, 2)
             grid.push(self.rot_window, (0, 3), (0, 4))
 
             grid.push(self.orientation_plot.plot, 1, 0)
@@ -366,6 +374,11 @@ class Ui:
 
                 self.pressure_series.append_data(new_timestamp, t.pressure)
 
+                self.motor_setpoint_front_left.append_data(new_timestamp, t.motor_setpoints.front_left * 100)
+                self.motor_setpoint_front_right.append_data(new_timestamp, t.motor_setpoints.front_right * 100)
+                self.motor_setpoint_back_left.append_data(new_timestamp, t.motor_setpoints.back_left * 100)
+                self.motor_setpoint_back_right.append_data(new_timestamp, t.motor_setpoints.back_right * 100)
+
                 # Update last timestamp (for host side orientation calcs)
                 last_timestamp = new_timestamp
 
@@ -379,6 +392,7 @@ class Ui:
                 self.gyro_plot.update(xaxis_end)
                 self.mag_plot.update(xaxis_end)
                 self.pressure_plot.update(xaxis_end)
+                self.motor_setpoints_plot.update(xaxis_end)
 
             # Update rotation visualizer clip space
             self.rot_visualizer.update(dpg.get_item_width(self.rot_window), dpg.get_item_height(self.rot_window))
@@ -389,7 +403,7 @@ class Ui:
                 self.controller_params_binding.dirty = False
 
             # Send controller setpoints based on gamepad input
-            self.gamepad_input.update(self.command_queue, self.setpoints_queue)
+            self.gamepad_input.update(self.setpoints_queue)
 
             dpg.render_dearpygui_frame()
 

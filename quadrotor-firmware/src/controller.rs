@@ -1,5 +1,9 @@
+use core::f32::consts::FRAC_PI_2;
+
 use quadrotor_x::datatypes::{ControllerParams, ControllerSetpoints, MotorSetpoints, PidParams, Quatf, Vec3f};
 use quadrotor_x::sensor_fusion::G_TO_MPS2;
+
+const YAW_ANGULAR_VELOCITY: f32 = FRAC_PI_2;
 
 fn truncate_pos_or_neg(value: f32, abs_max: f32) -> f32 {
     if value > abs_max {
@@ -44,6 +48,7 @@ pub struct Controller {
     pub params: ControllerParams,
     last_thrust: Option<f32>,
     last_orientation: Option<Quatf>,
+    yaw_setpoint: Option<f32>,
     thrust_pid: Pid,
     roll_pid: Pid,
     pitch_pid: Pid,
@@ -56,6 +61,7 @@ impl Controller {
             params,
             last_thrust: None,
             last_orientation: None,
+            yaw_setpoint: None,
             thrust_pid: Pid::new(),
             roll_pid: Pid::new(),
             pitch_pid: Pid::new(),
@@ -64,7 +70,9 @@ impl Controller {
     }
 
     pub fn reset(self: &mut Self) {
+        self.last_thrust = None;
         self.last_orientation = None;
+        self.yaw_setpoint = None;
         self.thrust_pid.clear_integral();
         self.roll_pid.clear_integral();
         self.pitch_pid.clear_integral();
@@ -91,6 +99,13 @@ impl Controller {
             None => eulers,
         };
 
+        // NOTE: The yaw input is treated as an angular velocity setpoint, so integrate it to get
+        //       the yaw angle setpoint.
+        let last_yaw_setpoint = self.yaw_setpoint.unwrap_or(eulers.z);
+        let yaw_setpoint = last_yaw_setpoint + (YAW_ANGULAR_VELOCITY * setpoints.yaw * delta_t);
+        self.yaw_setpoint = Some(yaw_setpoint);
+
+
         // Update PIDs
         let thrust_output = self.thrust_pid.get_output(
             self.params.thrust,
@@ -115,17 +130,22 @@ impl Controller {
         );
         let yaw_output = self.yaw_pid.get_output(
             self.params.yaw,
-            setpoints.yaw,
+            yaw_setpoint,
             delta_t,
             eulers.z,
             last_eulers.z,
         );
 
+        let front_left = (thrust_output + roll_output - pitch_output + yaw_output).clamp(0., 1.);
+        let front_right = (thrust_output - roll_output - pitch_output - yaw_output).clamp(0., 1.);
+        let back_left = (thrust_output + roll_output + pitch_output - yaw_output).clamp(0., 1.);
+        let back_right = (thrust_output - roll_output + pitch_output + yaw_output).clamp(0., 1.);
+
         MotorSetpoints {
-            front_left: thrust_output + roll_output + pitch_output + yaw_output,
-            front_right: thrust_output - roll_output + pitch_output - yaw_output,
-            back_left: thrust_output + roll_output - pitch_output - yaw_output,
-            back_right: thrust_output - roll_output - pitch_output + yaw_output,
+            front_left,
+            front_right,
+            back_left,
+            back_right,
         }
     }
 }

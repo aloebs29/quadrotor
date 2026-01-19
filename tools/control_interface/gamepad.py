@@ -23,7 +23,7 @@ class GamepadInputHandler:
             # NOTE: We still want to support using the telemetry viewer as just a telemetry viewer and not an input
             print("Did not find gamepad to use for input.")
 
-    def update(self, command_queue, setpoints_queue):
+    def update(self, setpoints_queue):
         if self.device is None:
             return
 

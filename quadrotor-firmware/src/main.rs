@@ -124,10 +124,11 @@ async fn main(spawner: Spawner) {
     // Initialize motor outputs
     let mut motor_outputs = motor::MotorOutputs::new(
         p.PWM0,
-        p.P0_07.into(),     // NRF52840 feather D6
-        p.P0_26.into(),     // NRF52840 feather D9
         p.P0_27.into(),     // NRF52840 feather D10
-        p.P0_06.into());    // NRF52840 feather D11
+        p.P0_06.into(),     // NRF52840 feather D11
+        p.P0_26.into(),     // NRF52840 feather D9
+        p.P0_07.into(),     // NRF52840 feather D6
+    );
 
     // Initialize persistent data service
     let mut persistent_data_service = persistent_data::PersistentDataService::new(&sd).await;
