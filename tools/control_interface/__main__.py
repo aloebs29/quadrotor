@@ -403,7 +403,8 @@ class Ui:
                 self.controller_params_binding.dirty = False
 
             # Send controller setpoints based on gamepad input
-            self.gamepad_input.update(self.setpoints_queue)
+            setpoints = self.gamepad_input.update()
+            self.setpoints_queue.put(Command.update_controller_setpoints(setpoints))
 
             dpg.render_dearpygui_frame()
 
