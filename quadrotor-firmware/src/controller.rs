@@ -1,7 +1,6 @@
 use core::f32::consts::FRAC_PI_2;
 
-use quadrotor_x::datatypes::{ControllerParams, ControllerSetpoints, MotorSetpoints, PidParams, Quatf, Vec3f};
-use quadrotor_x::sensor_fusion::G_TO_MPS2;
+use quadrotor_x::datatypes::{ControllerParams, ControllerSetpoints, MotorSetpoints, PidParams, Quatf};
 
 const YAW_ANGULAR_VELOCITY: f32 = FRAC_PI_2;
 
@@ -46,7 +45,6 @@ impl Pid {
 
 pub struct Controller {
     pub params: ControllerParams,
-    last_thrust: Option<f32>,
     last_orientation: Option<Quatf>,
     yaw_setpoint: Option<f32>,
     thrust_pid: Pid,
@@ -59,7 +57,6 @@ impl Controller {
     pub fn new(params: ControllerParams) -> Self {
         Self {
             params,
-            last_thrust: None,
             last_orientation: None,
             yaw_setpoint: None,
             thrust_pid: Pid::new(),
@@ -70,7 +67,6 @@ impl Controller {
     }
 
     pub fn reset(self: &mut Self) {
-        self.last_thrust = None;
         self.last_orientation = None;
         self.yaw_setpoint = None;
         self.thrust_pid.clear_integral();
@@ -81,18 +77,11 @@ impl Controller {
 
     pub fn update(
         self: &mut Self,
-        accel: &Vec3f,
         orientation: &Quatf,
         setpoints: &ControllerSetpoints,
         delta_t: f32,
     ) -> MotorSetpoints {
-        // Figure out upward acceleration (in the quadrotor's frame)
-        let gravity_in_crafts_frame = orientation.rotate_vector(&Vec3f::new(0., 0., G_TO_MPS2));
-        let corrected_accel = *accel - gravity_in_crafts_frame;
-        let thrust = corrected_accel.z;
-
         // Retrieve & update "last" values (used for calculating PID derivative term).
-        let last_thrust = self.last_thrust.unwrap_or_else(|| thrust);
         let eulers = orientation.as_euler_angles();
         let last_eulers = match self.last_orientation {
             Some(value) => value.as_euler_angles(),
@@ -105,14 +94,15 @@ impl Controller {
         let yaw_setpoint = last_yaw_setpoint + (YAW_ANGULAR_VELOCITY * setpoints.yaw * delta_t);
         self.yaw_setpoint = Some(yaw_setpoint);
 
-
         // Update PIDs
+        // TODO: Implement altitude estimate to get thrust feedback. For now, this is basically just
+        //       a gain setting for the controller input.
         let thrust_output = self.thrust_pid.get_output(
             self.params.thrust,
             setpoints.thrust,
             delta_t,
-            thrust,
-            last_thrust,
+            0.,
+            0.,
         );
         let roll_output = self.roll_pid.get_output(
             self.params.roll,
@@ -136,10 +126,18 @@ impl Controller {
             last_eulers.z,
         );
 
-        let front_left = (thrust_output + roll_output - pitch_output + yaw_output).clamp(0., 1.);
-        let front_right = (thrust_output - roll_output - pitch_output - yaw_output).clamp(0., 1.);
-        let back_left = (thrust_output + roll_output + pitch_output - yaw_output).clamp(0., 1.);
-        let back_right = (thrust_output - roll_output + pitch_output + yaw_output).clamp(0., 1.);
+        // Clamp max output of any one axis to 1. The setpoints are normalized, so this basically
+        // just means it can contribute the maximum +/- value for the motor, but no more, so that
+        // it can't _completely_ drown out the other axes if the controller gets in a bad state.
+        let thrust_output = truncate_pos_or_neg(thrust_output, 1.);
+        let roll_output = truncate_pos_or_neg(roll_output, 1.);
+        let pitch_output = truncate_pos_or_neg(pitch_output, 1.);
+        let yaw_output = truncate_pos_or_neg(yaw_output, 1.);
+
+        let front_left = (thrust_output + roll_output + pitch_output - yaw_output).clamp(0., 1.);
+        let front_right = (thrust_output - roll_output + pitch_output + yaw_output).clamp(0., 1.);
+        let back_left = (thrust_output + roll_output - pitch_output + yaw_output).clamp(0., 1.);
+        let back_right = (thrust_output - roll_output - pitch_output - yaw_output).clamp(0., 1.);
 
         MotorSetpoints {
             front_left,

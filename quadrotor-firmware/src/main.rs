@@ -281,7 +281,7 @@ async fn main(spawner: Spawner) {
 
         let mut motor_setpoints = MotorSetpoints::zeroed();
         if let ControllerState::Active = controller_state {
-            motor_setpoints = controller.update(&accel_msmt, &orientation, &controller_setpoints, delta_t);
+            motor_setpoints = controller.update(&orientation, &controller_setpoints, delta_t);
         }
         motor_outputs.set_all(motor_setpoints);
 
