@@ -1,6 +1,9 @@
 # Quadrotor
 
-WIP quadcopter flight controller.
+Basic quadcopter flight controller.
+
+![Picture of the quadrotor and game controller](./assets/craft_and_controller.jpg)
+![Screenshot of the control interface](./assets/control_interface_screenshot.png)
 
 ## Hardware
 
@@ -98,4 +101,8 @@ python -m tools.control_interface
 The control interface requires that the device is connected via USB (to query the BLE address from the device) and is
 connectable via BLE.
 
-TODO: Allow optional arg to bypass the BLE address query over USB and let the user choose from scanned devices.
+## Future improvements (that probably won't ever happen)
+
+* Add altitude estimate & control (maybe time-of-flight sensor? pressure sensor is too close to rotors)
+* Custom PCB
+* 3d printed body
