@@ -1,6 +1,8 @@
 #![no_main]
 #![no_std]
 
+use core::sync::atomic::{AtomicBool, Ordering};
+
 use embassy_executor::Spawner;
 use embassy_futures::join::join;
 use embassy_time::{Duration, Instant, Timer};
@@ -66,6 +68,10 @@ async fn main(spawner: Spawner) {
     //       triggered by the soft device (see `softdevice_task`).
     static VBUS_DETECT_CELL: StaticCell<SoftwareVbusDetect> = StaticCell::new();
     let vbus_detect = VBUS_DETECT_CELL.init(SoftwareVbusDetect::new(true, true));
+    // NOTE: VBUS detect doesn't expose any pub functions for checking its state (as far as I can tell), so this is an
+    // extra "vbus detect" flag for use by the application layer.
+    static VBUS_CONNECTED_CELL: StaticCell<AtomicBool> = StaticCell::new();
+    let vbus_connected = VBUS_CONNECTED_CELL.init(AtomicBool::new(false));
 
     // Initialize soft device with settings from BLE module
     let sd = Softdevice::enable(&ble_server::get_softdevice_config());
@@ -134,7 +140,7 @@ async fn main(spawner: Spawner) {
     let mut persistent_data_service = persistent_data::PersistentDataService::new(&sd).await;
 
     // Start tasks
-    unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect)));
+    unwrap!(spawner.spawn(softdevice_task(sd, vbus_detect, vbus_connected)));
     unwrap!(spawner.spawn(status_led::status_led_task(led, controller_state_signal)));
     unwrap!(spawner.spawn(usb_serial::usb_task(usb_device)));
     unwrap!(spawner.spawn(usb_serial::serial_task(serial_context)));
@@ -279,7 +285,18 @@ async fn main(spawner: Spawner) {
         timestamp = new_timestamp;
         orientation = madgwick_fusion_6(orientation, accel_msmt, gyro_msmt, delta_t);
 
+        // Check for controller auto-deactivate conditions, and set outputs
         let mut motor_setpoints = MotorSetpoints::zeroed();
+        if let ControllerState::Active = controller_state {
+            if vbus_connected.load(Ordering::Relaxed) {
+                info!("Charging detected; deactivating controller.");
+                controller_state = ControllerState::Inactive;
+            }
+            if orientation.rotate_vector(&Vec3f::new(0., 0., 1.)).z < 0. {
+                info!("Quadrotor appears to be upside down; deactivating controller.");
+                controller_state = ControllerState::Inactive;
+            }
+        }
         if let ControllerState::Active = controller_state {
             motor_setpoints = controller.update(&orientation, &controller_setpoints, delta_t);
         }
@@ -301,7 +318,7 @@ async fn main(spawner: Spawner) {
 }
 
 #[embassy_executor::task]
-async fn softdevice_task(sd: &'static Softdevice, vbus_detect: &'static SoftwareVbusDetect) -> ! {
+async fn softdevice_task(sd: &'static Softdevice, vbus_detect: &'static SoftwareVbusDetect, vbus_connected: &'static AtomicBool) -> ! {
     unsafe {
         nrf_softdevice::raw::sd_power_usbdetected_enable(1);
         nrf_softdevice::raw::sd_power_usbpwrrdy_enable(1);
@@ -310,8 +327,14 @@ async fn softdevice_task(sd: &'static Softdevice, vbus_detect: &'static Software
     };
     sd.run_with_callback(|event: SocEvent| {
         match event {
-            SocEvent::PowerUsbRemoved => vbus_detect.detected(false),
-            SocEvent::PowerUsbDetected => vbus_detect.detected(true),
+            SocEvent::PowerUsbRemoved => {
+                vbus_detect.detected(false);
+                vbus_connected.store(false, Ordering::Relaxed);
+            },
+            SocEvent::PowerUsbDetected => {
+                vbus_detect.detected(true);
+                vbus_connected.store(true, Ordering::Relaxed);
+            },
             SocEvent::PowerUsbPowerReady => vbus_detect.ready(),
             _ => {}
         };
